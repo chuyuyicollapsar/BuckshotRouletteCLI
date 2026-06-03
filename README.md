@@ -1,4 +1,4 @@
-# Buckshot Roulette CLI 🔫
+# Buckshot Roulette CLI
 
 命令行版本的恶魔轮盘赌游戏。
 
