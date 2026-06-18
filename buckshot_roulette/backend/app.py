@@ -16,6 +16,7 @@ from buckshot_roulette.backend.schemas import (
     EventEnvelope,
     JoinRoomRequest,
     JoinRoomResponse,
+    LeaveRoomRequest,
     ReadyRequest,
     RoomListItem,
     RoomResponse,
@@ -124,6 +125,12 @@ def create_app() -> FastAPI:
     @app.post("/rooms/{room_code}/ready", response_model=RoomResponse)
     async def set_ready(room_code: str, request: ReadyRequest) -> RoomResponse:
         room = room_service.set_ready(room_code, request.player_token, request.ready)
+        await publish_room_update(room, "room_updated")
+        return serialize_room(room)
+
+    @app.post("/rooms/{room_code}/leave", response_model=RoomResponse)
+    async def leave_room(room_code: str, request: LeaveRoomRequest) -> RoomResponse:
+        room = room_service.leave_room(room_code, request.player_token)
         await publish_room_update(room, "room_updated")
         return serialize_room(room)
 

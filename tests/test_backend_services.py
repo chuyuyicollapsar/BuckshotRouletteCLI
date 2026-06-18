@@ -122,6 +122,15 @@ class BackendServiceTests(unittest.TestCase):
         public_events = [event for event in events if event.visible_to == "ALL"]
         self.assertIn("使用了放大镜", public_events[0].message)
 
+    def test_owner_leave_transfers_owner_in_lobby(self):
+        _, _, room_service, _, room, owner = self.make_services()
+        room, bob = room_service.join_room(room.room_code, "Bob")
+
+        room_service.leave_room(room.room_code, owner.token)
+
+        self.assertEqual(room.owner_player_id, bob.player_id)
+        self.assertEqual(room.players[0].status.value, "LEFT")
+
 
 if __name__ == "__main__":
     unittest.main()

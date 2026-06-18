@@ -1,11 +1,12 @@
 # Buckshot Roulette CLI
 
-恶魔轮盘赌的 Python 实现。当前仓库已包含核心游戏引擎和内存版后端房间 MVP，后续会扩展联机 CLI 客户端和 LLM AI 玩家。
+恶魔轮盘赌的 Python 实现。当前仓库已包含核心游戏引擎、内存版后端房间 MVP 和 CLI 客户端 MVP，后续会扩展 LLM AI 玩家。
 
 ## 当前状态
 
 - **游戏引擎**：已实现核心规则、道具、装弹、回合切换、三场比赛流程。
 - **后端房间 MVP**：已实现创建房间、搜索公开房间、输入房间号加入、准备、开始、提交行动、WebSocket 事件推送和聊天事件。
+- **CLI 客户端 MVP**：已实现薄 CLI 客户端、事件渲染和用户操作指令。
 - **LLM AI 玩家**：设计中，目标是通过后台配置 provider、模型预设和 AI 玩家预设，再由 CLI 选择 AI 玩家加入房间。
 
 ## 技术栈
@@ -24,6 +25,7 @@
 ## 开发
 
 ```bash
+python -m pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
@@ -36,6 +38,16 @@ python main.py
 默认监听 `http://127.0.0.1:8000`。API 文档可访问 `http://127.0.0.1:8000/docs`。
 
 当前后端是内存版 MVP，重启后房间和对局会清空。
+
+WebSocket 事件推送需要安装 `uvicorn[standard]` 或等价的 WebSocket 协议依赖。
+
+## 启动 CLI 客户端
+
+```bash
+python -m buckshot_roulette.cli --server http://127.0.0.1:8000 --name Alice
+```
+
+CLI 是薄客户端：通过 HTTP 管理房间和提交行动，通过 WebSocket 接收房间事件、可见状态和聊天消息。
 
 ## 架构原则
 

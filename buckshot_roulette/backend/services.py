@@ -112,6 +112,22 @@ class RoomService:
         room.updated_at = utc_now()
         return room
 
+    def leave_room(self, room_code: str, token: str) -> Room:
+        room = self.get_room(room_code)
+        player = self.require_player(room, token)
+        if room.status == RoomStatus.IN_GAME:
+            player.status = RoomPlayerStatus.DISCONNECTED
+        else:
+            player.status = RoomPlayerStatus.LEFT
+            if player.id == room.owner_player_id:
+                active_players = self._active_players(room)
+                if active_players:
+                    room.owner_player_id = active_players[0].id
+                else:
+                    room.status = RoomStatus.CLOSED
+        room.updated_at = utc_now()
+        return room
+
     def require_player(self, room: Room, token: str) -> RoomPlayer:
         token_hash = self._hash_token(token)
         for player in room.players:

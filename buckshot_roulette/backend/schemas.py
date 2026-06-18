@@ -26,6 +26,10 @@ class ReadyRequest(BaseModel):
     ready: bool
 
 
+class LeaveRoomRequest(BaseModel):
+    player_token: str
+
+
 class StartGameRequest(BaseModel):
     player_token: str
 
