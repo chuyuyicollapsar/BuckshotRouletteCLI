@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from buckshot_roulette.models import GameState, MatchConfig
+from buckshot_roulette.llm.models import AIPlayerPresetSnapshot
 
 
 Visibility = Literal["ALL"] | list[int]
@@ -47,6 +48,7 @@ class RoomPlayer:
     status: RoomPlayerStatus
     token_hash: str | None = None
     seat_index: int | None = None
+    ai_preset_snapshot: AIPlayerPresetSnapshot | None = None
     joined_at: datetime = field(default_factory=utc_now)
 
 

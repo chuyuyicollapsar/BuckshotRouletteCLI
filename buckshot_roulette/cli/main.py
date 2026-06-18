@@ -85,6 +85,13 @@ class RoomSession:
         envelope = self.api.start_game(self.room_code, self.player_token)
         self._apply_envelope(envelope, print_updates=not self.has_websocket())
 
+    def add_ai_player(self, ai_player_preset_id: str) -> None:
+        self.room = self.api.add_ai_player(
+            self.room_code,
+            self.player_token,
+            ai_player_preset_id,
+        )
+
     def send_chat(self, message: str) -> None:
         envelope = self.api.send_chat(self.room_code, self.player_token, message)
         self._apply_envelope(envelope, print_updates=not self.has_websocket())
@@ -151,7 +158,8 @@ class CliApp:
             print("1. 创建房间")
             print("2. 搜索公开房间")
             print("3. 输入房间号加入")
-            print("4. 退出")
+            print("4. 查看 AI 玩家预设")
+            print("5. 退出")
             choice = input("选择：").strip()
             try:
                 if choice == "1":
@@ -161,6 +169,8 @@ class CliApp:
                 elif choice == "3":
                     self._join_by_code()
                 elif choice == "4":
+                    self._list_ai_presets()
+                elif choice == "5":
                     return 0
                 else:
                     print("请输入有效选项。")
@@ -211,6 +221,18 @@ class CliApp:
         response = self.api.join_room(room_code, self.player_name)
         self._enter_room(response)
 
+    def _list_ai_presets(self) -> None:
+        presets = self.api.list_ai_player_presets()
+        if not presets:
+            print("没有启用的 AI 玩家预设。")
+            return
+        print("\nAI 玩家预设：")
+        for preset in presets:
+            print(
+                f"- {preset['id']} | {preset['display_name']} | "
+                f"model={preset['model_preset_id']}"
+            )
+
     def _enter_room(self, response: dict[str, Any]) -> None:
         session = RoomSession(
             self.api,
@@ -249,9 +271,10 @@ class CliApp:
         print("\n大厅操作：")
         print(f"1. {'取消准备' if ready else '准备'}")
         print("2. 开始游戏（房主）")
-        print("3. 聊天")
-        print("4. 刷新")
-        print("5. 离开房间")
+        print("3. 添加 AI 玩家（房主）")
+        print("4. 聊天")
+        print("5. 刷新")
+        print("6. 离开房间")
         choice = input("选择：").strip()
         try:
             if choice == "1":
@@ -261,10 +284,12 @@ class CliApp:
                 session.start_game()
                 session.refresh()
             elif choice == "3":
-                self._chat(session)
+                self._add_ai_player(session)
             elif choice == "4":
-                session.refresh()
+                self._chat(session)
             elif choice == "5":
+                session.refresh()
+            elif choice == "6":
                 session.leave()
                 return True
             else:
@@ -273,6 +298,21 @@ class CliApp:
             print(f"操作失败：{exc}")
             safe_refresh(session)
         return False
+
+    def _add_ai_player(self, session: RoomSession) -> None:
+        presets = self.api.list_ai_player_presets()
+        if not presets:
+            print("没有启用的 AI 玩家预设。")
+            return
+        print("\n选择 AI 玩家预设：")
+        for index, preset in enumerate(presets, start=1):
+            print(
+                f"{index}. {preset['display_name']} "
+                f"({preset['id']}, model={preset['model_preset_id']})"
+            )
+        selected = prompt_int("选择预设：", 1, len(presets))
+        session.add_ai_player(presets[selected - 1]["id"])
+        session.refresh()
 
     def _game_menu(
         self, session: RoomSession, state: dict[str, Any] | None

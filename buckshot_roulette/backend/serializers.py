@@ -20,6 +20,11 @@ def serialize_room_player(player: RoomPlayer, room: Room) -> RoomPlayerResponse:
         status=player.status.value,
         seat_index=player.seat_index,
         is_owner=player.id == room.owner_player_id,
+        ai_preset_id=(
+            player.ai_preset_snapshot.preset_id
+            if player.ai_preset_snapshot is not None
+            else None
+        ),
     )
 
 

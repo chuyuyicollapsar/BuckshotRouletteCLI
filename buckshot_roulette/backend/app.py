@@ -10,6 +10,8 @@ from buckshot_roulette.backend.models import RoomVisibility
 from buckshot_roulette.backend.repositories import InMemoryStore
 from buckshot_roulette.backend.schemas import (
     ActionRequest,
+    AddAIPlayerRequest,
+    AIPlayerPresetRequest,
     ChatRequest,
     CreateRoomRequest,
     CreateRoomResponse,
@@ -17,6 +19,8 @@ from buckshot_roulette.backend.schemas import (
     JoinRoomRequest,
     JoinRoomResponse,
     LeaveRoomRequest,
+    ModelPresetRequest,
+    ProviderConfigRequest,
     ReadyRequest,
     RoomListItem,
     RoomResponse,
@@ -35,6 +39,17 @@ from buckshot_roulette.backend.services import (
     TurnCoordinator,
 )
 from buckshot_roulette.engine import GameEngine
+from buckshot_roulette.llm.repositories import LLMConfigStore
+from buckshot_roulette.llm.serializers import (
+    ai_player_preset_to_dict,
+    model_preset_to_dict,
+    provider_to_public_dict,
+)
+from buckshot_roulette.llm.services import (
+    LLMAdminService,
+    LLMConfigError,
+    LLMDecisionService,
+)
 
 
 def create_app() -> FastAPI:
@@ -45,12 +60,18 @@ def create_app() -> FastAPI:
     session_service = GameSessionService(store, engine)
     turn_coordinator = TurnCoordinator(room_service, session_service, engine)
     publisher = EventPublisher()
+    llm_store = LLMConfigStore()
+    llm_admin_service = LLMAdminService(llm_store)
+    llm_decision_service = LLMDecisionService(llm_store)
 
     app.state.store = store
     app.state.room_service = room_service
     app.state.session_service = session_service
     app.state.turn_coordinator = turn_coordinator
     app.state.publisher = publisher
+    app.state.llm_store = llm_store
+    app.state.llm_admin_service = llm_admin_service
+    app.state.llm_decision_service = llm_decision_service
 
     def _events_visible_to_player(events, seat_index):
         visible = []
@@ -85,6 +106,14 @@ def create_app() -> FastAPI:
     async def service_error_handler(_, exc: ServiceError) -> JSONResponse:
         status_code = 401 if isinstance(exc, AuthError) else 400
         return JSONResponse({"detail": str(exc)}, status_code=status_code)
+
+    @app.exception_handler(LLMConfigError)
+    async def llm_error_handler(_, exc: LLMConfigError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(KeyError)
+    async def key_error_handler(_, exc: KeyError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=404)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -121,6 +150,15 @@ def create_app() -> FastAPI:
             player_id=token.player_id,
             player_token=token.token,
         )
+
+    @app.post("/rooms/{room_code}/ai-players", response_model=RoomResponse)
+    async def add_ai_player(
+        room_code: str, request: AddAIPlayerRequest
+    ) -> RoomResponse:
+        snapshot = llm_admin_service.create_ai_snapshot(request.ai_player_preset_id)
+        room = room_service.add_ai_player(room_code, request.player_token, snapshot)
+        await publish_room_update(room, "room_updated")
+        return serialize_room(room)
 
     @app.post("/rooms/{room_code}/ready", response_model=RoomResponse)
     async def set_ready(room_code: str, request: ReadyRequest) -> RoomResponse:
@@ -218,6 +256,74 @@ def create_app() -> FastAPI:
                         await publish_room_update(room, "chat_message", [event])
         except WebSocketDisconnect:
             publisher.disconnect(room.room_code, websocket)
+
+    @app.get("/ai-player-presets")
+    async def list_enabled_ai_player_presets():
+        return [
+            ai_player_preset_to_dict(preset)
+            for preset in llm_store.enabled_ai_player_presets()
+        ]
+
+    @app.get("/admin/llm/providers")
+    async def admin_list_providers():
+        return [
+            provider_to_public_dict(provider)
+            for provider in llm_store.list_providers()
+        ]
+
+    @app.post("/admin/llm/providers")
+    async def admin_upsert_provider(request: ProviderConfigRequest):
+        provider = llm_admin_service.create_provider(request.model_dump())
+        return provider_to_public_dict(provider)
+
+    @app.post("/admin/llm/providers/{provider_id}/test")
+    async def admin_test_provider(provider_id: str):
+        return llm_admin_service.test_provider(provider_id)
+
+    @app.get("/admin/llm/model-presets")
+    async def admin_list_model_presets():
+        return [
+            model_preset_to_dict(preset)
+            for preset in llm_store.list_model_presets()
+        ]
+
+    @app.post("/admin/llm/model-presets")
+    async def admin_upsert_model_preset(request: ModelPresetRequest):
+        preset = llm_admin_service.create_model_preset(request.model_dump())
+        return model_preset_to_dict(preset)
+
+    @app.post("/admin/llm/model-presets/{preset_id}/test")
+    async def admin_test_model_preset(preset_id: str):
+        preset = llm_store.get_model_preset(preset_id)
+        provider_result = llm_admin_service.test_provider(preset.provider_id)
+        return {
+            "ok": provider_result.ok,
+            "message": provider_result.message,
+            "details": {
+                **provider_result.details,
+                "model_preset_id": preset.id,
+                "model_name": preset.model_name,
+                "structured_output": (
+                    "fake" if preset.provider_id == "fake_local" else "not_tested"
+                ),
+            },
+        }
+
+    @app.get("/admin/ai-player-presets")
+    async def admin_list_ai_player_presets():
+        return [
+            ai_player_preset_to_dict(preset)
+            for preset in llm_store.list_ai_player_presets()
+        ]
+
+    @app.post("/admin/ai-player-presets")
+    async def admin_upsert_ai_player_preset(request: AIPlayerPresetRequest):
+        preset = llm_admin_service.create_ai_player_preset(request.model_dump())
+        return ai_player_preset_to_dict(preset)
+
+    @app.post("/admin/ai-player-presets/{preset_id}/test-action")
+    async def admin_test_ai_player_action(preset_id: str):
+        return llm_decision_service.test_ai_action(preset_id)
 
     return app
 

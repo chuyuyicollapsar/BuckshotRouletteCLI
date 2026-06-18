@@ -103,6 +103,29 @@ class RoomService:
         room.updated_at = utc_now()
         return room, token
 
+    def add_ai_player(
+        self,
+        room_code: str,
+        owner_token: str,
+        ai_snapshot,
+    ) -> Room:
+        room = self.get_room(room_code)
+        self.require_owner(room, owner_token)
+        if room.status != RoomStatus.LOBBY:
+            raise ServiceError("只能在大厅中添加 AI 玩家。")
+        if len(self._active_players(room)) >= room.max_players:
+            raise ServiceError("房间已满。")
+        player = RoomPlayer(
+            id=str(uuid.uuid4()),
+            name=ai_snapshot.display_name,
+            type=RoomPlayerType.AI,
+            status=RoomPlayerStatus.READY,
+            ai_preset_snapshot=ai_snapshot,
+        )
+        room.players.append(player)
+        room.updated_at = utc_now()
+        return room
+
     def set_ready(self, room_code: str, token: str, ready: bool) -> Room:
         room = self.get_room(room_code)
         if room.status != RoomStatus.LOBBY:
@@ -152,7 +175,10 @@ class RoomService:
         for player in players:
             if player.id == room.owner_player_id:
                 continue
-            if player.status != RoomPlayerStatus.READY:
+            if (
+                player.type == RoomPlayerType.HUMAN
+                and player.status != RoomPlayerStatus.READY
+            ):
                 raise ServiceError("还有玩家未准备。")
         for index, player in enumerate(players):
             player.seat_index = index

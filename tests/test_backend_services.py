@@ -10,6 +10,8 @@ from buckshot_roulette.backend.services import (
     TurnCoordinator,
 )
 from buckshot_roulette.engine import GameEngine
+from buckshot_roulette.llm.repositories import LLMConfigStore
+from buckshot_roulette.llm.services import LLMAdminService
 from buckshot_roulette.models import ItemType, MatchConfig, ShellType
 
 
@@ -130,6 +132,18 @@ class BackendServiceTests(unittest.TestCase):
 
         self.assertEqual(room.owner_player_id, bob.player_id)
         self.assertEqual(room.players[0].status.value, "LEFT")
+
+    def test_owner_can_add_ai_player_snapshot(self):
+        _, _, room_service, _, room, owner = self.make_services()
+        llm_admin = LLMAdminService(LLMConfigStore())
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+
+        self.assertEqual(len(room.players), 2)
+        self.assertEqual(room.players[1].type.value, "AI")
+        self.assertEqual(room.players[1].status.value, "READY")
+        self.assertEqual(room.players[1].ai_preset_snapshot.preset_id, "fake_cautious")
 
 
 if __name__ == "__main__":

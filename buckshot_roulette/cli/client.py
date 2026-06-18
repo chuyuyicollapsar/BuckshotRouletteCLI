@@ -61,6 +61,23 @@ class ApiClient:
             {"player_name": player_name},
         )
 
+    def list_ai_player_presets(self) -> list[dict[str, Any]]:
+        return self.get("/ai-player-presets")
+
+    def add_ai_player(
+        self,
+        room_code: str,
+        player_token: str,
+        ai_player_preset_id: str,
+    ) -> dict[str, Any]:
+        return self.post(
+            f"/rooms/{quote(room_code.upper())}/ai-players",
+            {
+                "player_token": player_token,
+                "ai_player_preset_id": ai_player_preset_id,
+            },
+        )
+
     def leave_room(self, room_code: str, player_token: str) -> dict[str, Any]:
         return self.post(
             f"/rooms/{quote(room_code.upper())}/leave",

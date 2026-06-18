@@ -21,6 +21,11 @@ class JoinRoomRequest(BaseModel):
     player_name: str = Field(min_length=1, max_length=32)
 
 
+class AddAIPlayerRequest(BaseModel):
+    player_token: str
+    ai_player_preset_id: str = Field(min_length=1)
+
+
 class ReadyRequest(BaseModel):
     player_token: str
     ready: bool
@@ -52,6 +57,7 @@ class RoomPlayerResponse(BaseModel):
     status: str
     seat_index: int | None
     is_owner: bool = False
+    ai_preset_id: str | None = None
 
 
 class RoomResponse(BaseModel):
@@ -126,3 +132,41 @@ class EventEnvelope(BaseModel):
     event: GameEventResponse | None = None
     events: list[GameEventResponse] = Field(default_factory=list)
     message: str | None = None
+
+
+class ProviderConfigRequest(BaseModel):
+    id: str
+    display_name: str | None = None
+    type: str = "third_party"
+    protocol: str
+    base_url: str | None = None
+    api_key_env: str | None = None
+    api_key: str | None = None
+    class_path: str | None = None
+    kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelPresetRequest(BaseModel):
+    id: str
+    display_name: str | None = None
+    provider_id: str
+    model_name: str
+    temperature: float | None = None
+    max_tokens: int | None = None
+    reasoning_effort: str | None = None
+    timeout_seconds: int = 30
+    max_retries: int = 2
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class AIPlayerPresetRequest(BaseModel):
+    id: str
+    display_name: str | None = None
+    enabled: bool = True
+    model_preset_id: str
+    persona_prompt: str = ""
+    strategy_prompt: str = ""
+    max_item_actions_per_turn: int = 8
+    max_parse_failures_per_turn: int = 2
+    max_illegal_actions_per_turn: int = 2
+    fallback_policy: str = "conservative_shot"
