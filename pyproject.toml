@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "buckshot-roulette-cli"
+version = "0.1.0"
+description = "Networked Buckshot Roulette backend and thin CLI client"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[project.optional-dependencies]
+openai = ["langchain-openai"]
+anthropic = ["langchain-anthropic"]
+gemini = ["langchain-google-genai"]
+deepseek = ["langchain-deepseek"]
+llm = [
+    "langchain-openai",
+    "langchain-anthropic",
+    "langchain-google-genai",
+    "langchain-deepseek",
+]
+
+[project.scripts]
+buckshot-server = "buckshot_roulette.server:main"
+buckshot-client = "buckshot_roulette.cli.main:main"
