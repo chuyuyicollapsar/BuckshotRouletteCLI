@@ -40,7 +40,7 @@ from buckshot_roulette.backend.services import (
 )
 from buckshot_roulette.engine import GameEngine
 from buckshot_roulette.llm.ai_player_controller import AIPlayerController
-from buckshot_roulette.llm.repositories import LLMConfigStore
+from buckshot_roulette.llm.repositories import FileBackedLLMConfigStore, LLMConfigStore
 from buckshot_roulette.llm.serializers import (
     ai_player_preset_to_dict,
     model_preset_to_dict,
@@ -53,7 +53,7 @@ from buckshot_roulette.llm.services import (
 )
 
 
-def create_app() -> FastAPI:
+def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
     app = FastAPI(title="Buckshot Roulette Backend")
     store = InMemoryStore()
     engine = GameEngine()
@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
     session_service = GameSessionService(store, engine)
     turn_coordinator = TurnCoordinator(room_service, session_service, engine)
     publisher = EventPublisher()
-    llm_store = LLMConfigStore()
+    llm_store = llm_store or FileBackedLLMConfigStore.from_default_path()
     llm_admin_service = LLMAdminService(llm_store)
     llm_decision_service = LLMDecisionService(llm_store)
     ai_player_controller = AIPlayerController(llm_decision_service)
@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
     app.state.turn_coordinator = turn_coordinator
     app.state.publisher = publisher
     app.state.llm_store = llm_store
+    app.state.llm_config_path = getattr(llm_store, "path", None)
     app.state.llm_admin_service = llm_admin_service
     app.state.llm_decision_service = llm_decision_service
 
