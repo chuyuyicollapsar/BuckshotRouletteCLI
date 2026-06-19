@@ -65,7 +65,16 @@ POST /admin/ai-player-presets/fake_cautious/test-action
 POST /rooms/{room_code}/ai-players
 ```
 
-真实 LangChain provider 尚未默认调用；当前 `model-preset test` 只做配置格式和密钥存在性检查，`fake_local` 用于本地流程测试。
+真实 LangChain provider 使用可选依赖懒加载。需要哪个 provider 就安装对应包：
+
+```bash
+python -m pip install langchain-openai
+python -m pip install langchain-anthropic
+python -m pip install langchain-google-genai
+python -m pip install langchain-deepseek
+```
+
+`model-preset test` 会检查 API Key、provider 依赖和模型构造。默认 `fake_local` 用于本地流程测试，不调用外部网络。
 
 ## 架构原则
 

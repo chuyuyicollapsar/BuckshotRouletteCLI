@@ -3,7 +3,11 @@ from __future__ import annotations
 from urllib.parse import urlparse
 import os
 
-from buckshot_roulette.llm.model_factory import LangChainModelFactory, ModelFactoryError
+from buckshot_roulette.llm.model_factory import (
+    LangChainModelFactory,
+    MissingProviderDependencyError,
+    ModelFactoryError,
+)
 from buckshot_roulette.llm.models import (
     AIPlayerPreset,
     AIPlayerPresetSnapshot,
@@ -27,8 +31,15 @@ class LLMConfigError(ValueError):
 class LLMAdminService:
     ALLOWED_EXTRA_KEYS = {"top_p", "frequency_penalty", "presence_penalty", "stop"}
 
-    def __init__(self, store: LLMConfigStore) -> None:
+    def __init__(
+        self,
+        store: LLMConfigStore,
+        model_factory: LangChainModelFactory | None = None,
+        output_parser: OutputParser | None = None,
+    ) -> None:
         self.store = store
+        self.model_factory = model_factory or LangChainModelFactory()
+        self.output_parser = output_parser or OutputParser()
 
     def create_provider(self, data: dict) -> ProviderConfig:
         provider = ProviderConfig(
@@ -128,10 +139,82 @@ class LLMAdminService:
                 message="API Key 缺失。",
                 details={"api_key_env": provider.api_key_env},
             )
+        try:
+            self.model_factory.check_dependencies(provider)
+        except MissingProviderDependencyError as exc:
+            return PresetTestResult(
+                ok=False,
+                message=str(exc),
+                details={"package": exc.package_name, "import": exc.import_name},
+            )
         return PresetTestResult(
             ok=True,
-            message="配置格式有效；真实网络连通性尚未在本阶段调用。",
+            message="provider 配置和本地依赖有效。",
             details={"protocol": provider.protocol.value},
+        )
+
+    def test_model_preset(self, preset_id: str) -> PresetTestResult:
+        preset = self.store.get_model_preset(preset_id)
+        provider = self.store.get_provider(preset.provider_id)
+        provider_result = self.test_provider(provider.id)
+        if not provider_result.ok:
+            return PresetTestResult(
+                ok=False,
+                message=provider_result.message,
+                details={
+                    **provider_result.details,
+                    "model_preset_id": preset.id,
+                    "model_name": preset.model_name,
+                },
+            )
+        snapshot = ModelPresetSnapshot(
+            preset_id=preset.id,
+            preset_version=preset.version,
+            provider_id=preset.provider_id,
+            protocol=provider.protocol.value,
+            model_name=preset.model_name,
+            temperature=preset.temperature,
+            max_tokens=preset.max_tokens,
+            reasoning_effort=preset.reasoning_effort,
+            timeout_seconds=preset.timeout_seconds,
+            max_retries=preset.max_retries,
+            extra=dict(preset.extra),
+        )
+        try:
+            model = self.model_factory.create_chat_model(provider, snapshot)
+            if provider.protocol == ProviderProtocol.FAKE:
+                output = model.invoke(
+                    {
+                        "current_visible_state": {
+                            "legal_actions": [{"type": "shoot_self"}]
+                        }
+                    }
+                )
+                self.output_parser.parse(output)
+                structured_output = "ok"
+                network_tested = False
+            else:
+                structured_output = "not_tested"
+                network_tested = False
+        except MissingProviderDependencyError as exc:
+            return PresetTestResult(
+                ok=False,
+                message=str(exc),
+                details={"package": exc.package_name, "import": exc.import_name},
+            )
+        except (ModelFactoryError, OutputParserError) as exc:
+            return PresetTestResult(ok=False, message=str(exc))
+        return PresetTestResult(
+            ok=True,
+            message="模型预设可创建。",
+            details={
+                "model_preset_id": preset.id,
+                "model_name": preset.model_name,
+                "provider_id": provider.id,
+                "protocol": provider.protocol.value,
+                "structured_output": structured_output,
+                "network_tested": network_tested,
+            },
         )
 
     def _required_id(self, data: dict, key: str) -> str:
@@ -213,7 +296,7 @@ class LLMDecisionService:
             return self._fallback(snapshot, context)
 
     def test_ai_action(self, preset_id: str, context: dict | None = None) -> PresetTestResult:
-        admin = LLMAdminService(self.store)
+        admin = LLMAdminService(self.store, self.model_factory, self.output_parser)
         snapshot = admin.create_ai_snapshot(preset_id)
         test_context = context or self._default_test_context()
         decision = self.decide_one_action(snapshot, test_context)

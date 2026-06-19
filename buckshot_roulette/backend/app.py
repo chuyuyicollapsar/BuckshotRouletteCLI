@@ -294,20 +294,7 @@ def create_app() -> FastAPI:
 
     @app.post("/admin/llm/model-presets/{preset_id}/test")
     async def admin_test_model_preset(preset_id: str):
-        preset = llm_store.get_model_preset(preset_id)
-        provider_result = llm_admin_service.test_provider(preset.provider_id)
-        return {
-            "ok": provider_result.ok,
-            "message": provider_result.message,
-            "details": {
-                **provider_result.details,
-                "model_preset_id": preset.id,
-                "model_name": preset.model_name,
-                "structured_output": (
-                    "fake" if preset.provider_id == "fake_local" else "not_tested"
-                ),
-            },
-        }
+        return llm_admin_service.test_model_preset(preset_id)
 
     @app.get("/admin/ai-player-presets")
     async def admin_list_ai_player_presets():

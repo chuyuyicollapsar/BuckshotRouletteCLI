@@ -1,5 +1,11 @@
 import unittest
+from unittest.mock import patch
 
+from buckshot_roulette.llm.model_factory import (
+    LangChainChatModelAdapter,
+    LangChainModelFactory,
+    MissingProviderDependencyError,
+)
 from buckshot_roulette.llm.output_parser import OutputParser, OutputParserError
 from buckshot_roulette.llm.repositories import LLMConfigStore
 from buckshot_roulette.llm.serializers import provider_to_public_dict
@@ -78,6 +84,78 @@ class LLMServiceTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertIn(result.details["action"]["type"], {"shoot_player", "shoot_self"})
+
+    def test_missing_provider_dependency_is_reported(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+        admin.create_provider(
+            {
+                "id": "openai_official",
+                "display_name": "OpenAI",
+                "type": "official",
+                "protocol": "openai_responses",
+                "api_key": "sk-test",
+            }
+        )
+        admin.create_model_preset(
+            {
+                "id": "openai_model",
+                "provider_id": "openai_official",
+                "model_name": "gpt-test",
+            }
+        )
+
+        result = admin.test_model_preset("openai_model")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.details["package"], "langchain-openai")
+
+    def test_openai_factory_maps_responses_kwargs(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+        provider = admin.create_provider(
+            {
+                "id": "openai_official",
+                "display_name": "OpenAI",
+                "type": "official",
+                "protocol": "openai_responses",
+                "api_key": "sk-test",
+            }
+        )
+        preset = admin.create_model_preset(
+            {
+                "id": "openai_model",
+                "provider_id": "openai_official",
+                "model_name": "gpt-test",
+                "temperature": 0.2,
+                "max_tokens": 100,
+                "reasoning_effort": "medium",
+                "extra": {"top_p": 0.9},
+            }
+        )
+        snapshot = admin.create_ai_snapshot("fake_cautious").model_preset_snapshot
+        snapshot.provider_id = preset.provider_id
+        snapshot.model_name = preset.model_name
+        snapshot.temperature = preset.temperature
+        snapshot.max_tokens = preset.max_tokens
+        snapshot.reasoning_effort = preset.reasoning_effort
+        snapshot.extra = dict(preset.extra)
+        captured = {}
+
+        class DummyChat:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        factory = LangChainModelFactory()
+        with patch.object(factory, "_import_provider_class", return_value=DummyChat):
+            model = factory.create_chat_model(provider, snapshot)
+
+        self.assertIsInstance(model, LangChainChatModelAdapter)
+        self.assertEqual(captured["model"], "gpt-test")
+        self.assertTrue(captured["use_responses_api"])
+        self.assertEqual(captured["api_key"], "sk-test")
+        self.assertEqual(captured["reasoning_effort"], "medium")
+        self.assertEqual(captured["top_p"], 0.9)
 
 
 if __name__ == "__main__":

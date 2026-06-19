@@ -1,2 +1,8 @@
 fastapi
 uvicorn[standard]
+
+# Optional real LLM providers:
+# langchain-openai
+# langchain-anthropic
+# langchain-google-genai
+# langchain-deepseek
