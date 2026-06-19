@@ -27,6 +27,7 @@ from buckshot_roulette.backend.serializers import (
     serialize_event,
 )
 from buckshot_roulette.engine import GameEngine
+from buckshot_roulette.llm.ai_player_controller import AIPlayerController
 from buckshot_roulette.models import (
     ActionResult,
     ActionType,
@@ -273,10 +274,12 @@ class TurnCoordinator:
         room_service: RoomService,
         session_service: GameSessionService,
         engine: GameEngine,
+        ai_player_controller: AIPlayerController | None = None,
     ) -> None:
         self.room_service = room_service
         self.session_service = session_service
         self.engine = engine
+        self.ai_player_controller = ai_player_controller
 
     def start_game(self, room_code: str, owner_token: str) -> tuple[GameSession, list[GameEvent]]:
         room = self.room_service.get_room(room_code)
@@ -307,6 +310,7 @@ class TurnCoordinator:
             )
         )
         events.extend(self._start_round(session, match))
+        events.extend(self.run_ai_turns(room, session))
         return session, events
 
     def submit_action(
@@ -338,7 +342,43 @@ class TurnCoordinator:
             events.extend(self._start_round(session, match))
         if match.match_over:
             events.extend(self._finish_match_if_needed(room, session, match))
+        events.extend(self.run_ai_turns(room, session))
         return session, events
+
+    def run_ai_turns(
+        self,
+        room: Room,
+        session: GameSession,
+        *,
+        max_actions: int = 32,
+    ) -> list[GameEvent]:
+        if self.ai_player_controller is None:
+            return []
+        events: list[GameEvent] = []
+        actions_taken = 0
+        while (
+            room.status == RoomStatus.IN_GAME
+            and session.state.current_match_state is not None
+            and not session.state.game_over
+            and actions_taken < max_actions
+        ):
+            match = session.state.current_match_state
+            room_player = self._room_player_by_seat(room, match.current_player_idx)
+            if room_player is None or room_player.type != RoomPlayerType.AI:
+                break
+            ai_events = self._execute_one_ai_action(room, session, room_player)
+            events.extend(ai_events)
+            actions_taken += 1
+        if actions_taken >= max_actions:
+            events.append(
+                self.session_service.append_event(
+                    session,
+                    event_type="ai_safety_stop",
+                    message="AI 连续行动达到安全上限，已暂停自动行动。",
+                    payload={"max_actions": max_actions},
+                )
+            )
+        return events
 
     def build_visible_state(
         self, room: Room, room_player: RoomPlayer
@@ -407,6 +447,86 @@ class TurnCoordinator:
 
     def store_session(self, room: Room) -> GameSession | None:
         return self.session_service.store.get_session(room.game_session_id)
+
+    def _execute_one_ai_action(
+        self,
+        room: Room,
+        session: GameSession,
+        room_player: RoomPlayer,
+    ) -> list[GameEvent]:
+        match = session.state.current_match_state
+        if match is None or room_player.seat_index != match.current_player_idx:
+            return []
+        visible_state = self.build_visible_state(room, room_player)
+        try:
+            raw_action = self.ai_player_controller.decide_one_action(
+                room,
+                room_player,
+                session,
+                visible_state,
+            )
+        except Exception as exc:
+            raw_action = self._fallback_ai_action(match)
+            decision_event = {
+                "event_type": "ai_fallback",
+                "message": f"{room_player.name} 决策失败，使用保底行动。",
+                "payload": {"error": str(exc), "action": raw_action},
+                "visible_to": "ALL",
+            }
+        else:
+            decision_event = {
+                "event_type": "ai_decision",
+                "message": f"{room_player.name} 选择了一个行动。",
+                "payload": {"action": raw_action},
+                "visible_to": [room_player.seat_index],
+            }
+        try:
+            action_type, kwargs = self._parse_action(match, raw_action)
+            result = self.engine.execute_action(match, action_type, **kwargs)
+        except Exception as exc:
+            fallback = self._fallback_ai_action(match)
+            decision_event = {
+                "event_type": "ai_fallback",
+                "message": f"{room_player.name} 返回非法行动，改用保底行动。",
+                "payload": {
+                    "error": str(exc),
+                    "invalid_action": raw_action,
+                    "fallback_action": fallback,
+                },
+                "visible_to": "ALL",
+            }
+            action_type, kwargs = self._parse_action(match, fallback)
+            result = self.engine.execute_action(match, action_type, **kwargs)
+        session.revision += 1
+        events = [
+            self.session_service.append_event(
+                session,
+                event_type=decision_event["event_type"],
+                message=decision_event["message"],
+                payload=decision_event["payload"],
+                actor_player_id=room_player.seat_index,
+                visible_to=decision_event["visible_to"],
+            )
+        ]
+        events.extend(self._events_from_action_result(session, result))
+        if result.round_ended and not match.match_over:
+            events.extend(self._start_round(session, match))
+        if match.match_over:
+            events.extend(self._finish_match_if_needed(room, session, match))
+        return events
+
+    def _room_player_by_seat(self, room: Room, seat_index: int) -> RoomPlayer | None:
+        for player in room.players:
+            if player.seat_index == seat_index and player.status != RoomPlayerStatus.LEFT:
+                return player
+        return None
+
+    def _fallback_ai_action(self, match: MatchState) -> dict[str, Any]:
+        actor_idx = match.current_player_idx
+        for player in match.players:
+            if player.alive and player.id != actor_idx:
+                return {"type": "shoot_player", "target_player_id": player.id}
+        return {"type": "shoot_self"}
 
     def _start_round(self, session: GameSession, match: MatchState) -> list[GameEvent]:
         round_result = self.engine.start_round(match)

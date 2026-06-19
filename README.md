@@ -7,7 +7,7 @@
 - **游戏引擎**：已实现核心规则、道具、装弹、回合切换、三场比赛流程。
 - **后端房间 MVP**：已实现创建房间、搜索公开房间、输入房间号加入、准备、开始、提交行动、WebSocket 事件推送和聊天事件。
 - **CLI 客户端 MVP**：已实现薄 CLI 客户端、事件渲染和用户操作指令。
-- **LLM AI 玩家**：已实现 provider、模型预设、AI 玩家预设的内存版管理 API，支持 fake AI 预设测试和房间添加 AI 玩家；真实 provider 调用后续接入。
+- **LLM AI 玩家**：已实现 provider、模型预设、AI 玩家预设的内存版管理 API，支持 fake AI 预设测试、房间添加 AI 玩家和服务端自动 AI 回合控制。
 
 ## 技术栈
 
@@ -75,6 +75,8 @@ python -m pip install langchain-deepseek
 ```
 
 `model-preset test` 会检查 API Key、provider 依赖和模型构造。默认 `fake_local` 用于本地流程测试，不调用外部网络。
+
+AI 玩家不走 CLI/HTTP 行动协议。轮到 AI 时，服务端会构造该 AI 可见状态、请求单步决策、复用后端行动校验并写入事件日志；如果 AI 返回非法行动或 provider 失败，会使用保底开枪策略。
 
 ## 架构原则
 

@@ -39,6 +39,7 @@ from buckshot_roulette.backend.services import (
     TurnCoordinator,
 )
 from buckshot_roulette.engine import GameEngine
+from buckshot_roulette.llm.ai_player_controller import AIPlayerController
 from buckshot_roulette.llm.repositories import LLMConfigStore
 from buckshot_roulette.llm.serializers import (
     ai_player_preset_to_dict,
@@ -63,6 +64,8 @@ def create_app() -> FastAPI:
     llm_store = LLMConfigStore()
     llm_admin_service = LLMAdminService(llm_store)
     llm_decision_service = LLMDecisionService(llm_store)
+    ai_player_controller = AIPlayerController(llm_decision_service)
+    turn_coordinator.ai_player_controller = ai_player_controller
 
     app.state.store = store
     app.state.room_service = room_service
@@ -176,10 +179,14 @@ def create_app() -> FastAPI:
     async def start_game(room_code: str, request: StartGameRequest) -> EventEnvelope:
         session, events = turn_coordinator.start_game(room_code, request.player_token)
         room = room_service.get_room(room_code)
+        player = room_service.require_player(room, request.player_token)
         envelope = EventEnvelope(
             type="game_started",
             room=serialize_room(room),
-            events=[serialize_event(event) for event in events],
+            events=[
+                serialize_event(event)
+                for event in _events_visible_to_player(events, player.seat_index)
+            ],
         )
         await publish_room_update(room, "game_started", events)
         return envelope

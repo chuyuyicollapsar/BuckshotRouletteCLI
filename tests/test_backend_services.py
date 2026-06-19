@@ -10,8 +10,9 @@ from buckshot_roulette.backend.services import (
     TurnCoordinator,
 )
 from buckshot_roulette.engine import GameEngine
+from buckshot_roulette.llm.ai_player_controller import AIPlayerController
 from buckshot_roulette.llm.repositories import LLMConfigStore
-from buckshot_roulette.llm.services import LLMAdminService
+from buckshot_roulette.llm.services import LLMAdminService, LLMDecisionService
 from buckshot_roulette.models import ItemType, MatchConfig, ShellType
 
 
@@ -30,6 +31,28 @@ class BackendServiceTests(unittest.TestCase):
             config=config,
         )
         return store, engine, room_service, coordinator, room, owner
+
+    def make_ai_services(self, config=None):
+        store = InMemoryStore()
+        engine = GameEngine(random.Random(1))
+        room_service = RoomService(store)
+        session_service = GameSessionService(store, engine)
+        llm_store = LLMConfigStore()
+        coordinator = TurnCoordinator(
+            room_service,
+            session_service,
+            engine,
+            AIPlayerController(LLMDecisionService(llm_store)),
+        )
+        room, owner = room_service.create_room(
+            owner_name="Alice",
+            room_name="Test",
+            visibility=RoomVisibility.PUBLIC,
+            max_players=4,
+            config=config,
+        )
+        llm_admin = LLMAdminService(llm_store)
+        return store, engine, room_service, coordinator, room, owner, llm_admin
 
     def test_room_lifecycle_starts_game_and_builds_visible_state(self):
         config = MatchConfig(
@@ -144,6 +167,56 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual(room.players[1].type.value, "AI")
         self.assertEqual(room.players[1].status.value, "READY")
         self.assertEqual(room.players[1].ai_preset_snapshot.preset_id, "fake_cautious")
+
+    def test_ai_acts_automatically_when_game_starts_on_ai_turn(self):
+        config = MatchConfig(
+            fixed_initial_hp=1,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        # Put the AI in seat 0 so the first turn belongs to AI.
+        room.players = [room.players[1], room.players[0]]
+        room.owner_player_id = room.players[1].id
+
+        session, events = coordinator.start_game(room.room_code, owner.token)
+
+        event_types = [event.event_type for event in events]
+        self.assertIn("ai_decision", event_types)
+        self.assertIn("shoot_player", event_types)
+        self.assertEqual(session.state.match_results, [0, 0, 0])
+        self.assertTrue(session.state.game_over)
+        self.assertEqual(room.status.value, "FINISHED")
+        self.assertIn("match_ended", event_types)
+
+    def test_ai_acts_after_human_turn_switches_to_ai(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {"type": "shoot_player", "target_player_id": 1},
+        )
+
+        event_types = [event.event_type for event in events]
+        self.assertIn("shoot_player", event_types)
+        self.assertIn("ai_decision", event_types)
+        self.assertEqual(session.state.current_match_state.players[0].hp, 1)
 
 
 if __name__ == "__main__":

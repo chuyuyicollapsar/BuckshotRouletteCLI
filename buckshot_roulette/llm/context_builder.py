@@ -1,23 +1,20 @@
 from __future__ import annotations
 
 from buckshot_roulette.backend.models import GameEvent, GameSession, Room, RoomPlayer
+from buckshot_roulette.backend.schemas import PlayerVisibleStateResponse
 from buckshot_roulette.backend.serializers import serialize_event
-from buckshot_roulette.backend.services import TurnCoordinator
 
 
 class LLMContextBuilder:
-    def __init__(self, turn_coordinator: TurnCoordinator) -> None:
-        self.turn_coordinator = turn_coordinator
-
     def build_context(
         self,
         room: Room,
         room_player: RoomPlayer,
         session: GameSession,
+        visible_state: PlayerVisibleStateResponse,
         *,
         max_events: int = 50,
     ) -> dict:
-        state = self.turn_coordinator.build_visible_state(room, room_player)
         visible_events = self._visible_events(session.event_log, room_player.seat_index)
         return {
             "initial_info_memory": {
@@ -36,7 +33,7 @@ class LLMContextBuilder:
                 serialize_event(event).model_dump(mode="json")
                 for event in visible_events[-max_events:]
             ],
-            "current_visible_state": state.model_dump(mode="json"),
+            "current_visible_state": visible_state.model_dump(mode="json"),
         }
 
     def _visible_events(
