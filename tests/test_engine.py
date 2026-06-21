@@ -84,6 +84,46 @@ class GameEngineTests(unittest.TestCase):
         self.assertIsNone(match.jammer_target)
         self.assertEqual(match.current_player_idx, 1)
 
+    def test_dealt_jammer_is_limited_to_one_on_table(self):
+        engine = GameEngine(random.Random(1))
+        config = MatchConfig(
+            fixed_initial_hp=3,
+            enabled_items=frozenset({ItemType.JAMMER}),
+            items_per_reload=3,
+        )
+        game = engine.init_game(["A", "B", "C"], config)
+        match = engine.start_match(game)
+
+        dealt = engine.distribute_items(match)
+
+        total_jammers = sum(
+            player.items.count(ItemType.JAMMER) for player in match.players
+        )
+        self.assertEqual(total_jammers, 1)
+        self.assertEqual(
+            sum(items.count(ItemType.JAMMER) for items in dealt.values()),
+            1,
+        )
+
+    def test_active_jammer_effect_blocks_dealing_another_jammer(self):
+        engine = GameEngine(random.Random(1))
+        config = MatchConfig(
+            fixed_initial_hp=3,
+            enabled_items=frozenset({ItemType.JAMMER}),
+            items_per_reload=1,
+        )
+        game = engine.init_game(["A", "B", "C"], config)
+        match = engine.start_match(game)
+        match.jammer_target = 1
+
+        dealt = engine.distribute_items(match)
+
+        self.assertEqual(
+            sum(player.items.count(ItemType.JAMMER) for player in match.players),
+            0,
+        )
+        self.assertTrue(all(not items for items in dealt.values()))
+
 
 if __name__ == "__main__":
     unittest.main()

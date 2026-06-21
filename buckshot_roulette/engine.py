@@ -631,9 +631,13 @@ class GameEngine:
         table_counts = Counter(
             item for table_player in match.players for item in table_player.items
         )
+        if match.jammer_target is not None:
+            table_counts[ItemType.JAMMER] += 1
         player_counts = Counter(player.items)
         candidates: list[ItemType] = []
         for item in pool:
+            if item == ItemType.JAMMER and table_counts[item] >= 1:
+                continue
             player_limit = match.config.item_player_limits.get(item)
             if player_limit is not None and player_counts[item] >= player_limit:
                 continue
