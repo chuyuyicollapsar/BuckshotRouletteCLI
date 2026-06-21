@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlparse, urlunparse
@@ -151,6 +152,8 @@ class ApiClient:
                 raw = response.read()
         except HTTPError as exc:
             raise ApiError(self._read_error(exc)) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise ApiError("请求服务端超时；如果当前轮到 AI，可能仍在等待模型响应。") from exc
         except URLError as exc:
             raise ApiError(f"无法连接服务器：{exc.reason}") from exc
         if not raw:

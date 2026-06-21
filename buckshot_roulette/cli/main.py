@@ -500,6 +500,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="后端地址，默认 http://127.0.0.1:8000",
     )
     parser.add_argument("--name", help="临时显示名")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="HTTP request timeout in seconds. Default: 60.",
+    )
     return parser.parse_args(argv)
 
 
@@ -514,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
     if not name:
         print("临时显示名不能为空。")
         return 2
-    app = CliApp(ApiClient(server), name)
+    app = CliApp(ApiClient(server, timeout=args.timeout), name)
     try:
         return app.run()
     except KeyboardInterrupt:
