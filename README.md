@@ -91,6 +91,8 @@ LLM/API 配置会保存到 `llm_config.json`。默认位置：
 
 可以用 `BUCKSHOT_LLM_CONFIG_FILE` 指定完整配置文件路径，或用 `BUCKSHOT_DATA_DIR` 指定配置目录。真实 API Key 推荐通过 `api_key_env` 引用环境变量；`api_key` 明文写入配置文件，只建议本地开发使用。
 
+配置 provider、model preset 和 AI player preset 的标准脚本模板见 `scripts/config_llm_presets.ps1`。
+
 AI 玩家不走 CLI/HTTP 行动协议。轮到 AI 时，服务端会构造该 AI 可见状态、请求单步决策、复用后端行动校验并写入事件日志；如果 AI 返回非法行动或 provider 失败，会使用保底开枪策略。
 
 ## 架构原则
