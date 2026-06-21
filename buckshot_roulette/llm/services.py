@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 import os
 
@@ -26,6 +27,9 @@ from buckshot_roulette.llm.repositories import LLMConfigStore
 
 class LLMConfigError(ValueError):
     pass
+
+
+logger = logging.getLogger(__name__)
 
 
 class LLMAdminService:
@@ -292,7 +296,14 @@ class LLMDecisionService:
             raw = model.invoke(context)
             decision = self.output_parser.parse(raw)
             return self._validate_against_legal_actions(decision, context)
-        except (ModelFactoryError, OutputParserError, LLMConfigError):
+        except (ModelFactoryError, OutputParserError, LLMConfigError) as exc:
+            logger.warning(
+                "LLM decision failed; using fallback action. preset_id=%s "
+                "model_preset_id=%s error=%s",
+                snapshot.preset_id,
+                snapshot.model_preset_snapshot.preset_id,
+                exc,
+            )
             return self._fallback(snapshot, context)
 
     def test_ai_action(self, preset_id: str, context: dict | None = None) -> PresetTestResult:

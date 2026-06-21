@@ -76,6 +76,21 @@ class LLMServiceTests(unittest.TestCase):
         with self.assertRaises(OutputParserError):
             parser.parse('{"action":{"type":"shoot_player"}}')
 
+    def test_output_parser_accepts_markdown_json_block(self):
+        parser = OutputParser()
+
+        decision = parser.parse(
+            '```json\n'
+            '{"thought_summary":"x","action":{"type":"shoot_player",'
+            '"target_player_id":0}}\n'
+            '```'
+        )
+
+        self.assertEqual(
+            decision.action,
+            {"type": "shoot_player", "target_player_id": 0},
+        )
+
     def test_fake_decision_service_returns_legal_action(self):
         store = LLMConfigStore()
         decision_service = LLMDecisionService(store)
@@ -105,7 +120,14 @@ class LLMServiceTests(unittest.TestCase):
             }
         )
 
-        result = admin.test_model_preset("openai_model")
+        with patch.object(
+            admin.model_factory,
+            "check_dependencies",
+            side_effect=MissingProviderDependencyError(
+                "langchain-openai", "langchain_openai"
+            ),
+        ):
+            result = admin.test_model_preset("openai_model")
 
         self.assertFalse(result.ok)
         self.assertEqual(result.details["package"], "langchain-openai")
