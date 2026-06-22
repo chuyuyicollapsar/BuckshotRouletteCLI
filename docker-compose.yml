@@ -3,10 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        EXTRAS: ${BUCKSHOT_EXTRAS:-}
     image: buckshot-roulette-server:0.1.0
     container_name: buckshot-roulette-server
     ports:
       - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       BUCKSHOT_DATA_DIR: /data
     volumes:

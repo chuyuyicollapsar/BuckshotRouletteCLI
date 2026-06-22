@@ -21,5 +21,8 @@ Thumbs.db
 .env
 *.env.local
 
+# Local scripts
+scripts/custom/
+
 # Project specific
 *.db

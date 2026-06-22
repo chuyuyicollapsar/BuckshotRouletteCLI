@@ -23,13 +23,6 @@
 - [LLM API 需求设计](docs/LLMAPI需求设计.md)：provider、模型预设、AI 玩家预设、结构化输出和保底策略。
 - [部署指南](docs/部署指南.md)：服务端 Docker、客户端独立程序、镜像分发和升级流程。
 
-## 架构原则
-
-- `GameEngine` 只处理游戏规则，不依赖 HTTP、CLI、LLM。
-- 联机模式下，权威 `GameState` 只存在于后端。
-- CLI 是客户端入口，负责展示状态和提交玩家意图。
-- LLM 只作为服务端内部 AI 玩家决策器，模型输出必须经过后端校验后才能进入游戏引擎。
-
 ## 开发
 
 ```bash
@@ -107,6 +100,8 @@ AI 玩家不走 CLI/HTTP 行动协议。轮到 AI 时，服务端会构造该 AI
 
 ### 服务端 Docker
 
+#### 本地启动
+
 本地有项目源码时，打开 Docker Desktop 后，在项目根目录执行：
 
 ```bash
@@ -133,7 +128,46 @@ curl http://127.0.0.1:8000/health
 docker compose down
 ```
 
+#### Docker Desktop 管理
+
 容器启动后，可以在 Docker Desktop 的 Containers 页面管理 `buckshot-roulette-server`，包括 Start、Stop、Restart 和查看日志。
+
+如果容器已经创建好，后续普通启动/停止可以直接用 Docker Desktop，不需要每次重新输入 `docker run` 参数。新增 provider 依赖时需要重新构建镜像；只新增 API Key 环境变量时，重新创建容器即可。
+
+#### 真实 LLM provider
+
+如果需要真实 LLM provider，可以复制 `.env.example` 为 `.env`，填写构建 extras 和需要传入容器的 API Key 环境变量，然后重新构建镜像并启动容器：
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+`.env` 是 Docker Compose 使用的本地变量文件，不提交到 Git。更完整的 Docker 配置说明见 [部署指南](docs/部署指南.md)。
+
+只新增或修改 API Key 环境变量、不新增 provider 依赖时，不需要重新构建镜像。可以停止并删除旧容器，再用 `docker run -e` 创建新容器：
+
+```bash
+docker stop buckshot-roulette-server
+docker rm buckshot-roulette-server
+docker run -d --name buckshot-roulette-server --restart unless-stopped -p 8000:8000 -v buckshot-data:/data -e MY_PROVIDER_API_KEY=your_api_key buckshot-roulette-server:0.1.0
+```
+
+配置 provider/model/AI preset 可以在宿主机上调用后端 HTTP API。Windows 使用：
+
+```powershell
+.\scripts\config_llm_presets.ps1
+```
+
+Linux / WSL 使用：
+
+```bash
+bash scripts/config_llm_presets.sh
+```
+
+配置脚本写入的是容器内服务端使用的 `/data/llm_config.json`。真实 API Key 不写入配置文件，而是通过 Docker 环境变量传入容器。
+
+#### 发布镜像
 
 如果要把服务端分发给服主，推荐发布镜像：
 
@@ -178,4 +212,11 @@ dist/client/windows/buckshot-client.exe
 dist/client/linux/buckshot-client
 ```
 
-`dist/` 和 `build/` 是构建输出目录。修改客户端代码后，重新运行对应构建脚本即可生成新的客户端程序。
+`dist/` 和 `build/` 是构建输出目录，不提交到 Git。修改客户端代码后，重新运行对应构建脚本即可生成新的客户端程序。
+
+## 架构原则
+
+- `GameEngine` 只处理游戏规则，不依赖 HTTP、CLI、LLM。
+- 联机模式下，权威 `GameState` 只存在于后端。
+- CLI 是客户端入口，负责展示状态和提交玩家意图。
+- LLM 只作为服务端内部 AI 玩家决策器，模型输出必须经过后端校验后才能进入游戏引擎。
