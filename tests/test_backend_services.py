@@ -76,6 +76,11 @@ class BackendServiceTests(unittest.TestCase):
         ])
         self.assertEqual(visible.current_player_id, 0)
         self.assertEqual(visible.public_shell_counts["remaining"], 2)
+        self.assertNotIn("LIVE", visible.public_shell_counts)
+        self.assertNotIn("BLANK", visible.public_shell_counts)
+        round_event = events[-1]
+        self.assertEqual(round_event.payload["live_count"], 1)
+        self.assertEqual(round_event.payload["blank_count"], 1)
         self.assertIn({"type": "shoot_self"}, visible.legal_actions)
 
     def test_only_current_player_can_submit_action(self):
@@ -217,6 +222,36 @@ class BackendServiceTests(unittest.TestCase):
         self.assertIn("shoot_player", event_types)
         self.assertIn("ai_decision", event_types)
         self.assertEqual(session.state.current_match_state.players[0].hp, 1)
+
+    def test_human_action_can_publish_before_ai_turn_runs(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, human_events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {"type": "shoot_player", "target_player_id": 1},
+            run_ai_turns=False,
+        )
+
+        self.assertEqual([event.event_type for event in human_events], ["shoot_player"])
+        self.assertEqual(session.state.current_match_state.current_player_idx, 1)
+
+        ai_events = coordinator.run_ai_turns(room, session)
+
+        event_types = [event.event_type for event in ai_events]
+        self.assertIn("ai_decision", event_types)
+        self.assertIn("shoot_player", event_types)
 
 
 if __name__ == "__main__":

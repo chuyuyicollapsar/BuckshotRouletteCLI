@@ -31,23 +31,24 @@ def print_room(room: dict[str, Any], player_id: str | None = None) -> None:
         )
 
 
+def print_game_header(room: dict[str, Any]) -> None:
+    print(f"\n房间 {room['room_code']} | {room['name']}")
+
+
 def print_visible_state(state: dict[str, Any]) -> None:
     print(
-        f"\n状态：{state['room_status']} | revision {state['revision']} | "
+        f"状态：revision {state['revision']} | "
         f"比分 {format_match_results(state.get('match_results', []))}"
     )
     counts = state.get("public_shell_counts", {})
     if counts.get("remaining", 0):
-        print(
-            f"弹匣：剩余 {counts.get('remaining', 0)}，"
-            f"LIVE {counts.get('LIVE', 0)} / BLANK {counts.get('BLANK', 0)}"
-        )
+        print(f"弹匣：剩余 {counts.get('remaining', 0)}")
     current_id = state.get("current_player_id")
     current_name = player_name(state, current_id)
     if current_name:
         print(f"当前行动：[{current_id}] {current_name}")
 
-    print("玩家状态：")
+    print("玩家：")
     for player in state.get("visible_players", []):
         if "hp" in player:
             marker = "->" if player.get("player_id") == current_id else "  "

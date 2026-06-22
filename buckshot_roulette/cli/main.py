@@ -11,6 +11,7 @@ from .renderer import (
     action_label,
     alive_opponents,
     item_label,
+    print_game_header,
     print_events,
     print_room,
     print_visible_state,
@@ -36,13 +37,14 @@ class RoomSession:
         self._ws: WebSocketClient | None = None
         self._ws_connected = False
         self._listener: threading.Thread | None = None
+        self._printed_event_keys: set[tuple[str, int]] = set()
 
     @property
     def room_code(self) -> str:
         return self.room["room_code"]
 
     def start(self) -> None:
-        self.refresh()
+        self.refresh(mark_events=True)
         self._listener = threading.Thread(target=self._listen, daemon=True)
         self._listener.start()
 
@@ -51,12 +53,21 @@ class RoomSession:
         if self._ws is not None:
             self._ws.close()
 
-    def refresh(self) -> None:
+    def refresh(
+        self, *, print_updates: bool = False, mark_events: bool = False
+    ) -> None:
         room = self.api.get_room(self.room_code)
         state = self.api.visible_state(self.room_code, self.player_token)
         with self._lock:
             self.room = room
-            self.visible_state = state
+            self._set_visible_state(state)
+        events = list(state.get("visible_events") or [])
+        if mark_events:
+            self._mark_events(events)
+        elif print_updates:
+            events = self._new_events(events)
+            if events:
+                print_events(events)
 
     def room_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -131,14 +142,52 @@ class RoomSession:
             if envelope.get("room") is not None:
                 self.room = envelope["room"]
             if envelope.get("visible_state") is not None:
-                self.visible_state = envelope["visible_state"]
+                self._set_visible_state(envelope["visible_state"])
         if not print_updates:
             return
         events = list(envelope.get("events") or [])
         if envelope.get("event") is not None:
             events.append(envelope["event"])
+        events = self._new_events(events)
         if events:
             print_events(events)
+
+    def _new_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        new_events: list[dict[str, Any]] = []
+        with self._lock:
+            for event in events:
+                event_key = self._event_key(event)
+                if event_key is None:
+                    new_events.append(event)
+                    continue
+                if event_key in self._printed_event_keys:
+                    continue
+                self._printed_event_keys.add(event_key)
+                new_events.append(event)
+        return new_events
+
+    def _mark_events(self, events: list[dict[str, Any]]) -> None:
+        with self._lock:
+            for event in events:
+                event_key = self._event_key(event)
+                if event_key is not None:
+                    self._printed_event_keys.add(event_key)
+
+    def _set_visible_state(self, state: dict[str, Any]) -> None:
+        if self.visible_state is None:
+            self.visible_state = state
+            return
+        current_revision = int(self.visible_state.get("revision", -1))
+        incoming_revision = int(state.get("revision", -1))
+        if incoming_revision >= current_revision:
+            self.visible_state = state
+
+    def _event_key(self, event: dict[str, Any]) -> tuple[str, int] | None:
+        game_id = event.get("game_id")
+        event_id = event.get("event_id")
+        if game_id is None or event_id is None:
+            return None
+        return str(game_id), int(event_id)
 
 
 class CliApp:
@@ -250,18 +299,22 @@ class CliApp:
         while True:
             room = session.room_snapshot()
             state = session.state_snapshot()
-            print_room(room, session.player_id)
-            if state is not None:
-                print_visible_state(state)
 
             status = room["status"]
             if status == "LOBBY":
+                print_room(room, session.player_id)
                 if self._lobby_menu(session, room):
                     return
             elif status == "IN_GAME":
+                print_game_header(room)
+                if state is not None:
+                    print_visible_state(state)
                 if self._game_menu(session, state):
                     return
             else:
+                print_room(room, session.player_id)
+                if state is not None:
+                    print_visible_state(state)
                 if self._finished_menu(session):
                     return
 
@@ -317,45 +370,79 @@ class CliApp:
     def _game_menu(
         self, session: RoomSession, state: dict[str, Any] | None
     ) -> bool:
+        if state is None:
+            print("\n等待状态同步。")
+            choice = input("回车刷新，c 聊天，q 断开：").strip().lower()
+            try:
+                if choice in {"", "r"}:
+                    session.refresh(print_updates=True)
+                elif choice == "c":
+                    self._chat(session)
+                elif choice == "q":
+                    session.close()
+                    return True
+                else:
+                    print("请输入有效命令。")
+            except ApiError as exc:
+                print(f"操作失败：{exc}")
+                safe_refresh(session)
+            return False
+
         my_turn = (
-            state is not None
-            and state.get("player_seat_index") == state.get("current_player_id")
+            state.get("player_seat_index") == state.get("current_player_id")
             and bool(state.get("legal_actions"))
         )
-        print("\n游戏操作：")
         if my_turn:
-            print("1. 提交行动")
-            print("2. 聊天")
-            print("3. 刷新")
-            print("4. 断开并返回主菜单")
-        else:
-            print("1. 聊天")
-            print("2. 刷新")
-            print("3. 断开并返回主菜单")
-        choice = input("选择：").strip()
+            return self._action_menu(session, state)
+
+        current_id = state.get("current_player_id")
+        print(f"\n等待 [{current_id}] 行动。")
+        choice = input("回车刷新，c 聊天，q 断开：").strip().lower()
         try:
-            if my_turn:
-                if choice == "1":
-                    self._submit_action(session, state)
-                elif choice == "2":
-                    self._chat(session)
-                elif choice == "3":
-                    session.refresh()
-                elif choice == "4":
-                    session.close()
-                    return True
-                else:
-                    print("请输入有效选项。")
+            if choice in {"", "r"}:
+                session.refresh(print_updates=True)
+            elif choice == "c":
+                self._chat(session)
+            elif choice == "q":
+                session.close()
+                return True
             else:
-                if choice == "1":
-                    self._chat(session)
-                elif choice == "2":
-                    session.refresh()
-                elif choice == "3":
-                    session.close()
-                    return True
-                else:
-                    print("请输入有效选项。")
+                print("请输入有效命令。")
+        except ApiError as exc:
+            print(f"操作失败：{exc}")
+            safe_refresh(session)
+        return False
+
+    def _action_menu(self, session: RoomSession, state: dict[str, Any]) -> bool:
+        actions = state.get("legal_actions", [])
+        if not actions:
+            print("当前没有可提交行动。")
+            return False
+
+        print("\n可选行动：")
+        for index, action in enumerate(actions, start=1):
+            print(f"{index}. {action_label(action, state)}")
+        print("c. 聊天    r. 刷新    q. 断开")
+        choice = input("选择：").strip().lower()
+        try:
+            if choice == "c":
+                self._chat(session)
+                return False
+            if choice in {"r", ""}:
+                session.refresh(print_updates=True)
+                return False
+            if choice == "q":
+                session.close()
+                return True
+            try:
+                selected = int(choice)
+            except ValueError:
+                print("请输入行动编号或命令。")
+                return False
+            if not 1 <= selected <= len(actions):
+                print("行动编号无效。")
+                return False
+            self._submit_action(session, state, selected - 1)
         except ApiError as exc:
             print(f"操作失败：{exc}")
             safe_refresh(session)
@@ -378,21 +465,18 @@ class CliApp:
             print("请输入有效选项。")
         return False
 
-    def _submit_action(self, session: RoomSession, state: dict[str, Any]) -> None:
+    def _submit_action(
+        self, session: RoomSession, state: dict[str, Any], action_index: int
+    ) -> None:
         actions = state.get("legal_actions", [])
         if not actions:
             print("当前没有可提交行动。")
             return
-        print("\n可选行动：")
-        for index, action in enumerate(actions, start=1):
-            print(f"{index}. {action_label(action, state)}")
-        selected = prompt_int("选择行动：", 1, len(actions))
-        action = dict(actions[selected - 1])
+        action = dict(actions[action_index])
         action.pop("requires_target_player_id", None)
         action.pop("requires_target_item_index", None)
         self._fill_action_targets(action, state)
         session.submit_action(action)
-        safe_refresh(session)
 
     def _fill_action_targets(self, action: dict[str, Any], state: dict[str, Any]) -> None:
         if action.get("type") != "use_item":

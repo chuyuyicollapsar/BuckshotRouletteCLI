@@ -88,13 +88,9 @@ def serialize_domain_player(player: Player) -> dict[str, Any]:
 
 def public_shell_counts(match: MatchState | None) -> dict[str, int]:
     if match is None or not match.chambers:
-        return {"LIVE": 0, "BLANK": 0, "remaining": 0}
+        return {"remaining": 0}
     remaining = match.chambers[match.chamber_index :]
-    return {
-        "LIVE": sum(1 for shell in remaining if shell.value == "LIVE"),
-        "BLANK": sum(1 for shell in remaining if shell.value == "BLANK"),
-        "remaining": len(remaining),
-    }
+    return {"remaining": len(remaining)}
 
 
 def item_action(item: ItemType, item_index: int) -> dict[str, Any]:

@@ -319,6 +319,8 @@ class TurnCoordinator:
         token: str,
         revision: int,
         raw_action: dict[str, Any],
+        *,
+        run_ai_turns: bool = True,
     ) -> tuple[GameSession, list[GameEvent]]:
         room = self.room_service.get_room(room_code)
         room_player = self.room_service.require_player(room, token)
@@ -342,7 +344,8 @@ class TurnCoordinator:
             events.extend(self._start_round(session, match))
         if match.match_over:
             events.extend(self._finish_match_if_needed(room, session, match))
-        events.extend(self.run_ai_turns(room, session))
+        if run_ai_turns:
+            events.extend(self.run_ai_turns(room, session))
         return session, events
 
     def run_ai_turns(

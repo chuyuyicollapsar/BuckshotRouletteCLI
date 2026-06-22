@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -106,6 +107,13 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
 
         await publisher.publish_personalized(room.room_code, payload_for)
 
+    async def run_ai_turns_and_publish(room_code):
+        room = room_service.get_room(room_code)
+        session = session_service.get_session_for_room(room)
+        events = await asyncio.to_thread(turn_coordinator.run_ai_turns, room, session)
+        if events:
+            await publish_room_update(room, "action_result", events)
+
     @app.exception_handler(ServiceError)
     async def service_error_handler(_, exc: ServiceError) -> JSONResponse:
         status_code = 401 if isinstance(exc, AuthError) else 400
@@ -199,6 +207,7 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
             request.player_token,
             request.revision,
             request.action,
+            run_ai_turns=False,
         )
         room = room_service.get_room(room_code)
         player = room_service.require_player(room, request.player_token)
@@ -212,6 +221,7 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
             visible_state=visible_state,
         )
         await publish_room_update(room, "action_result", events)
+        asyncio.create_task(run_ai_turns_and_publish(room.room_code))
         return envelope
 
     @app.post("/rooms/{room_code}/chat", response_model=EventEnvelope)
