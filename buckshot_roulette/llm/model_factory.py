@@ -59,6 +59,7 @@ class LangChainChatModelAdapter:
             "You are an AI player for a Buckshot Roulette game. "
             "Return exactly one JSON object with keys thought_summary and action. "
             "Do not use markdown fences, prose, XML tags, or comments. "
+            "Keep thought_summary under 120 characters and do not include chain-of-thought. "
             "Use only one action from current_visible_state.legal_actions. "
             "Do not reveal or assume hidden shell order. "
             "Track remaining LIVE/BLANK counts yourself from round_started events "
@@ -78,11 +79,33 @@ class LangChainChatModelAdapter:
         if tool_calls:
             return json.dumps(tool_calls, ensure_ascii=False)
         content = getattr(response, "content", response)
+        self._raise_if_only_reasoning_content(response, content)
         if isinstance(content, dict):
             return json.dumps(content, ensure_ascii=False)
         if isinstance(content, list):
             return self._content_blocks_to_text(content)
         return str(content)
+
+    def _raise_if_only_reasoning_content(self, response: Any, content: Any) -> None:
+        if content:
+            return
+        additional = getattr(response, "additional_kwargs", {}) or {}
+        reasoning_content = additional.get("reasoning_content")
+        if not reasoning_content:
+            return
+        metadata = getattr(response, "response_metadata", {}) or {}
+        token_usage = metadata.get("token_usage") or {}
+        completion_details = token_usage.get("completion_tokens_details") or {}
+        reason = metadata.get("finish_reason")
+        completion_tokens = token_usage.get("completion_tokens")
+        reasoning_tokens = completion_details.get("reasoning_tokens")
+        raise ModelFactoryError(
+            "模型只返回 reasoning_content，没有返回正文 content。"
+            f" finish_reason={reason}"
+            f" completion_tokens={completion_tokens}"
+            f" reasoning_tokens={reasoning_tokens}"
+            "；请关闭 thinking 或提高 max_tokens。"
+        )
 
     def _content_blocks_to_text(self, blocks: list[Any]) -> str:
         texts: list[str] = []

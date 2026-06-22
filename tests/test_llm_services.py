@@ -4,6 +4,7 @@ from unittest.mock import patch
 from buckshot_roulette.llm.model_factory import (
     LangChainChatModelAdapter,
     LangChainModelFactory,
+    ModelFactoryError,
     MissingProviderDependencyError,
 )
 from buckshot_roulette.llm.models import SingleActionDecision
@@ -108,6 +109,34 @@ class LLMServiceTests(unittest.TestCase):
             parser.parse("I choose to shoot myself.")
 
         self.assertIn("raw_output_preview", str(context.exception))
+
+    def test_langchain_adapter_reports_reasoning_only_response(self):
+        class DummyModel:
+            def invoke(self, _):
+                return type(
+                    "DummyResponse",
+                    (),
+                    {
+                        "content": "",
+                        "additional_kwargs": {"reasoning_content": "hidden"},
+                        "response_metadata": {
+                            "finish_reason": "length",
+                            "token_usage": {
+                                "completion_tokens": 500,
+                                "completion_tokens_details": {
+                                    "reasoning_tokens": 500,
+                                },
+                            },
+                        },
+                    },
+                )()
+
+        adapter = LangChainChatModelAdapter(DummyModel())
+
+        with self.assertRaises(ModelFactoryError) as context:
+            adapter.invoke({"current_visible_state": {"legal_actions": []}})
+
+        self.assertIn("只返回 reasoning_content", str(context.exception))
 
     def test_fake_decision_service_returns_legal_action(self):
         store = LLMConfigStore()
@@ -250,7 +279,11 @@ class LLMServiceTests(unittest.TestCase):
                 "temperature": 0.2,
                 "max_tokens": 100,
                 "reasoning_effort": "medium",
-                "extra": {"top_p": 0.9},
+                "extra": {
+                    "top_p": 0.9,
+                    "model_kwargs": {"response_format": {"type": "json_object"}},
+                    "extra_body": {"thinking": {"type": "disabled"}},
+                },
             }
         )
         snapshot = admin.create_ai_snapshot("fake_cautious").model_preset_snapshot
@@ -276,6 +309,14 @@ class LLMServiceTests(unittest.TestCase):
         self.assertEqual(captured["api_key"], "sk-test")
         self.assertEqual(captured["reasoning_effort"], "medium")
         self.assertEqual(captured["top_p"], 0.9)
+        self.assertEqual(
+            captured["model_kwargs"],
+            {"response_format": {"type": "json_object"}},
+        )
+        self.assertEqual(
+            captured["extra_body"],
+            {"thinking": {"type": "disabled"}},
+        )
 
 
 if __name__ == "__main__":

@@ -33,7 +33,14 @@ logger = logging.getLogger(__name__)
 
 
 class LLMAdminService:
-    ALLOWED_EXTRA_KEYS = {"top_p", "frequency_penalty", "presence_penalty", "stop"}
+    ALLOWED_EXTRA_KEYS = {
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "model_kwargs",
+        "extra_body",
+    }
 
     def __init__(
         self,
