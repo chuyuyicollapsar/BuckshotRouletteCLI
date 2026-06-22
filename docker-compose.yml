@@ -1,0 +1,17 @@
+services:
+  buckshot-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: buckshot-roulette-server:0.1.0
+    container_name: buckshot-roulette-server
+    ports:
+      - "8000:8000"
+    environment:
+      BUCKSHOT_DATA_DIR: /data
+    volumes:
+      - buckshot-data:/data
+    restart: unless-stopped
+
+volumes:
+  buckshot-data:
