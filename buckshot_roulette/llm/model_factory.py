@@ -46,14 +46,28 @@ class LangChainChatModelAdapter:
         self.model = model
 
     def invoke(self, context: dict) -> str:
+        ai_profile = context.get("ai_profile") or {}
+        profile_prompt = "\n".join(
+            part
+            for part in [
+                str(ai_profile.get("persona_prompt") or "").strip(),
+                str(ai_profile.get("strategy_prompt") or "").strip(),
+            ]
+            if part
+        )
+        system_prompt = (
+            "You are an AI player for a Buckshot Roulette game. "
+            "Return exactly one JSON object with keys thought_summary and action. "
+            "Use only one action from current_visible_state.legal_actions. "
+            "Do not reveal or assume hidden shell order. "
+            "Track remaining LIVE/BLANK counts yourself from round_started events "
+            "and public shot/item events. If the public history proves the next "
+            "shell is LIVE, prefer shooting an opponent over shooting yourself."
+        )
+        if profile_prompt:
+            system_prompt = f"{system_prompt}\n\nAI profile:\n{profile_prompt}"
         messages = [
-            (
-                "system",
-                "You are an AI player for a Buckshot Roulette game. "
-                "Return exactly one JSON object with keys thought_summary and action. "
-                "Use only one action from current_visible_state.legal_actions. "
-                "Do not reveal or assume hidden shell order.",
-            ),
+            ("system", system_prompt),
             ("human", json.dumps(context, ensure_ascii=False)),
         ]
         response = self.model.invoke(messages)

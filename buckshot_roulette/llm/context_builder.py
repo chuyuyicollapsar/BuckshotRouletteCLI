@@ -17,6 +17,17 @@ class LLMContextBuilder:
     ) -> dict:
         visible_events = self._visible_events(session.event_log, room_player.seat_index)
         return {
+            "ai_profile": {
+                "display_name": room_player.ai_preset_snapshot.display_name
+                if room_player.ai_preset_snapshot is not None
+                else room_player.name,
+                "persona_prompt": room_player.ai_preset_snapshot.persona_prompt
+                if room_player.ai_preset_snapshot is not None
+                else "",
+                "strategy_prompt": room_player.ai_preset_snapshot.strategy_prompt
+                if room_player.ai_preset_snapshot is not None
+                else "",
+            },
             "initial_info_memory": {
                 "game_id": session.id,
                 "players": [

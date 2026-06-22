@@ -12,6 +12,7 @@ from buckshot_roulette.backend.repositories import InMemoryStore
 from buckshot_roulette.backend.schemas import (
     ActionRequest,
     AddAIPlayerRequest,
+    AIActionTestRequest,
     AIPlayerPresetRequest,
     ChatRequest,
     CreateRoomRequest,
@@ -337,8 +338,11 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
         return ai_player_preset_to_dict(preset)
 
     @app.post("/admin/ai-player-presets/{preset_id}/test-action")
-    async def admin_test_ai_player_action(preset_id: str):
-        return llm_decision_service.test_ai_action(preset_id)
+    async def admin_test_ai_player_action(
+        preset_id: str, request: AIActionTestRequest | None = None
+    ):
+        context = request.context if request is not None else None
+        return llm_decision_service.test_ai_action(preset_id, context)
 
     return app
 

@@ -1,6 +1,8 @@
 import random
 import unittest
+from fastapi.testclient import TestClient
 
+from buckshot_roulette.backend.app import create_app
 from buckshot_roulette.backend.models import RoomVisibility
 from buckshot_roulette.backend.repositories import InMemoryStore
 from buckshot_roulette.backend.services import (
@@ -11,6 +13,7 @@ from buckshot_roulette.backend.services import (
 )
 from buckshot_roulette.engine import GameEngine
 from buckshot_roulette.llm.ai_player_controller import AIPlayerController
+from buckshot_roulette.llm.context_builder import LLMContextBuilder
 from buckshot_roulette.llm.repositories import LLMConfigStore
 from buckshot_roulette.llm.services import LLMAdminService, LLMDecisionService
 from buckshot_roulette.models import ItemType, MatchConfig, ShellType
@@ -252,6 +255,65 @@ class BackendServiceTests(unittest.TestCase):
         event_types = [event.event_type for event in ai_events]
         self.assertIn("ai_decision", event_types)
         self.assertIn("shoot_player", event_types)
+
+    def test_llm_context_includes_ai_profile(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        store, _, room_service, coordinator, room, owner, llm_admin = (
+            self.make_ai_services(config)
+        )
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        room.players = [room.players[1], room.players[0]]
+        room.owner_player_id = room.players[1].id
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+        ai_player = room.players[0]
+        visible_state = coordinator.build_visible_state(room, ai_player)
+
+        context = LLMContextBuilder().build_context(
+            room,
+            ai_player,
+            session,
+            visible_state,
+        )
+
+        self.assertEqual(context["ai_profile"]["display_name"], "Fake Cautious")
+        self.assertIn("deterministic fake player", context["ai_profile"]["persona_prompt"])
+
+    def test_admin_ai_action_test_accepts_custom_context(self):
+        context = {
+            "action_event_list": [
+                {
+                    "event_type": "round_started",
+                    "payload": {"live_count": 1, "blank_count": 2},
+                },
+                {"event_type": "shoot_self", "payload": {"shell": "BLANK"}},
+                {"event_type": "shoot_self", "payload": {"shell": "BLANK"}},
+            ],
+            "current_visible_state": {
+                "public_shell_counts": {"remaining": 1},
+                "legal_actions": [
+                    {"type": "shoot_self"},
+                    {"type": "shoot_player", "target_player_id": 0},
+                ],
+            },
+        }
+
+        with TestClient(create_app(LLMConfigStore())) as client:
+            response = client.post(
+                "/admin/ai-player-presets/fake_cautious/test-action",
+                json={"context": context},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            payload["details"]["action"],
+            {"type": "shoot_player", "target_player_id": 0},
+        )
 
 
 if __name__ == "__main__":

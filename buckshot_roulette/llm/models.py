@@ -102,6 +102,7 @@ class AIPlayerPresetSnapshot:
 class SingleActionDecision:
     thought_summary: str
     action: dict[str, Any]
+    fallback_reason: str | None = None
 
 
 @dataclass(slots=True)

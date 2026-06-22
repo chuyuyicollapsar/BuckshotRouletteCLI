@@ -482,12 +482,13 @@ class TurnCoordinator:
             return []
         visible_state = self.build_visible_state(room, room_player)
         try:
-            raw_action = self.ai_player_controller.decide_one_action(
+            decision = self.ai_player_controller.decide_one_action(
                 room,
                 room_player,
                 session,
                 visible_state,
             )
+            raw_action = decision.action
         except Exception as exc:
             raw_action = self._fallback_ai_action(match)
             decision_event = {
@@ -497,12 +498,26 @@ class TurnCoordinator:
                 "visible_to": "ALL",
             }
         else:
-            decision_event = {
-                "event_type": "ai_decision",
-                "message": f"{room_player.name} 选择了一个行动。",
-                "payload": {"action": raw_action},
-                "visible_to": [room_player.seat_index],
-            }
+            if decision.fallback_reason:
+                decision_event = {
+                    "event_type": "ai_fallback",
+                    "message": f"{room_player.name} 决策失败，使用保底行动。",
+                    "payload": {
+                        "error": decision.fallback_reason,
+                        "action": raw_action,
+                    },
+                    "visible_to": "ALL",
+                }
+            else:
+                decision_event = {
+                    "event_type": "ai_decision",
+                    "message": f"{room_player.name} 选择了一个行动。",
+                    "payload": {
+                        "action": raw_action,
+                        "thought_summary": decision.thought_summary,
+                    },
+                    "visible_to": [room_player.seat_index],
+                }
         try:
             action_type, kwargs = self._parse_action(match, raw_action)
             result = self.engine.execute_action(match, action_type, **kwargs)

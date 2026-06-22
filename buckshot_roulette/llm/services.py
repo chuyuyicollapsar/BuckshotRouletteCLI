@@ -296,7 +296,7 @@ class LLMDecisionService:
             raw = model.invoke(context)
             decision = self.output_parser.parse(raw)
             return self._validate_against_legal_actions(decision, context)
-        except (ModelFactoryError, OutputParserError, LLMConfigError) as exc:
+        except Exception as exc:
             logger.warning(
                 "LLM decision failed; using fallback action. preset_id=%s "
                 "model_preset_id=%s error=%s",
@@ -304,7 +304,7 @@ class LLMDecisionService:
                 snapshot.model_preset_snapshot.preset_id,
                 exc,
             )
-            return self._fallback(snapshot, context)
+            return self._fallback(snapshot, context, reason=str(exc))
 
     def test_ai_action(self, preset_id: str, context: dict | None = None) -> PresetTestResult:
         admin = LLMAdminService(self.store, self.model_factory, self.output_parser)
@@ -317,6 +317,7 @@ class LLMDecisionService:
             details={
                 "thought_summary": decision.thought_summary,
                 "action": decision.action,
+                "fallback_reason": decision.fallback_reason,
             },
         )
 
@@ -324,36 +325,105 @@ class LLMDecisionService:
         self, decision: SingleActionDecision, context: dict
     ) -> SingleActionDecision:
         legal_actions = context["current_visible_state"].get("legal_actions", [])
-        if decision.action not in legal_actions:
+        normalized_action = self._normalize_action(decision.action)
+        if normalized_action not in legal_actions:
             raise LLMConfigError("模型返回非法行动。")
+        decision.action = normalized_action
         return decision
 
+    def _normalize_action(self, action: dict) -> dict:
+        normalized = dict(action)
+        for key in {
+            "target_player_id",
+            "item_index",
+            "target_item_index",
+            "secondary_target_player_id",
+        }:
+            if key in normalized:
+                try:
+                    normalized[key] = int(normalized[key])
+                except (TypeError, ValueError) as exc:
+                    raise LLMConfigError(f"行动字段 {key} 必须是整数。") from exc
+        return normalized
+
     def _fallback(
-        self, snapshot: AIPlayerPresetSnapshot, context: dict
+        self,
+        snapshot: AIPlayerPresetSnapshot,
+        context: dict,
+        *,
+        reason: str | None = None,
     ) -> SingleActionDecision:
         legal_actions = context["current_visible_state"].get("legal_actions", [])
         if not legal_actions:
             return SingleActionDecision(
                 thought_summary="Fallback: no legal action.",
                 action={"type": "shoot_self"},
+                fallback_reason=reason,
             )
+        inferred_shell = self._infer_remaining_shell(context)
+        if inferred_shell == "LIVE":
+            for action in legal_actions:
+                if action.get("type") == "shoot_player":
+                    return SingleActionDecision(
+                        thought_summary="Fallback: public history implies LIVE.",
+                        action=action,
+                        fallback_reason=reason,
+                    )
+        if inferred_shell == "BLANK":
+            for action in legal_actions:
+                if action.get("type") == "shoot_self":
+                    return SingleActionDecision(
+                        thought_summary="Fallback: public history implies BLANK.",
+                        action=action,
+                        fallback_reason=reason,
+                    )
         if snapshot.fallback_policy == FallbackPolicy.ATTACK_LOWEST_HP.value:
             for action in legal_actions:
                 if action.get("type") == "shoot_player":
                     return SingleActionDecision(
                         thought_summary="Fallback: attack a legal target.",
                         action=action,
+                        fallback_reason=reason,
                     )
         for action in legal_actions:
             if action.get("type") == "shoot_self":
                 return SingleActionDecision(
                     thought_summary="Fallback: conservative shot.",
                     action=action,
+                    fallback_reason=reason,
                 )
         return SingleActionDecision(
             thought_summary="Fallback: first legal action.",
             action=legal_actions[0],
+            fallback_reason=reason,
         )
+
+    def _infer_remaining_shell(self, context: dict) -> str | None:
+        live_count: int | None = None
+        blank_count: int | None = None
+        for event in context.get("action_event_list", []):
+            event_type = event.get("event_type")
+            payload = event.get("payload") or {}
+            if event_type == "round_started":
+                if "live_count" in payload and "blank_count" in payload:
+                    live_count = int(payload["live_count"])
+                    blank_count = int(payload["blank_count"])
+            shell = payload.get("shell") or payload.get("ejected_shell")
+            if live_count is not None and shell == "LIVE":
+                live_count = max(0, live_count - 1)
+            elif blank_count is not None and shell == "BLANK":
+                blank_count = max(0, blank_count - 1)
+        remaining = (
+            context.get("current_visible_state", {})
+            .get("public_shell_counts", {})
+            .get("remaining")
+        )
+        if remaining == 1:
+            if live_count == 1 and blank_count == 0:
+                return "LIVE"
+            if live_count == 0 and blank_count == 1:
+                return "BLANK"
+        return None
 
     def _default_test_context(self) -> dict:
         return {

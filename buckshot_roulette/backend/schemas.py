@@ -170,3 +170,7 @@ class AIPlayerPresetRequest(BaseModel):
     max_parse_failures_per_turn: int = 2
     max_illegal_actions_per_turn: int = 2
     fallback_policy: str = "conservative_shot"
+
+
+class AIActionTestRequest(BaseModel):
+    context: dict[str, Any] | None = None
