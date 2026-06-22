@@ -365,23 +365,43 @@ class TurnCoordinator:
             and not session.state.game_over
             and actions_taken < max_actions
         ):
-            match = session.state.current_match_state
-            room_player = self._room_player_by_seat(room, match.current_player_idx)
-            if room_player is None or room_player.type != RoomPlayerType.AI:
+            ai_events = self.run_one_ai_turn(room, session)
+            if not ai_events:
                 break
-            ai_events = self._execute_one_ai_action(room, session, room_player)
             events.extend(ai_events)
             actions_taken += 1
         if actions_taken >= max_actions:
-            events.append(
-                self.session_service.append_event(
-                    session,
-                    event_type="ai_safety_stop",
-                    message="AI 连续行动达到安全上限，已暂停自动行动。",
-                    payload={"max_actions": max_actions},
-                )
-            )
+            events.append(self.append_ai_safety_stop(session, max_actions))
         return events
+
+    def run_one_ai_turn(
+        self,
+        room: Room,
+        session: GameSession,
+    ) -> list[GameEvent]:
+        if self.ai_player_controller is None:
+            return []
+        if (
+            room.status != RoomStatus.IN_GAME
+            or session.state.current_match_state is None
+            or session.state.game_over
+        ):
+            return []
+        match = session.state.current_match_state
+        room_player = self._room_player_by_seat(room, match.current_player_idx)
+        if room_player is None or room_player.type != RoomPlayerType.AI:
+            return []
+        return self._execute_one_ai_action(room, session, room_player)
+
+    def append_ai_safety_stop(
+        self, session: GameSession, max_actions: int
+    ) -> GameEvent:
+        return self.session_service.append_event(
+            session,
+            event_type="ai_safety_stop",
+            message="AI 连续行动达到安全上限，已暂停自动行动。",
+            payload={"max_actions": max_actions},
+        )
 
     def build_visible_state(
         self, room: Room, room_player: RoomPlayer

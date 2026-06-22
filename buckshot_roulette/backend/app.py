@@ -110,9 +110,19 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
     async def run_ai_turns_and_publish(room_code):
         room = room_service.get_room(room_code)
         session = session_service.get_session_for_room(room)
-        events = await asyncio.to_thread(turn_coordinator.run_ai_turns, room, session)
-        if events:
+        actions_taken = 0
+        max_actions = 32
+        while actions_taken < max_actions:
+            events = await asyncio.to_thread(
+                turn_coordinator.run_one_ai_turn, room, session
+            )
+            if not events:
+                break
             await publish_room_update(room, "action_result", events)
+            actions_taken += 1
+        if actions_taken >= max_actions:
+            event = turn_coordinator.append_ai_safety_stop(session, max_actions)
+            await publish_room_update(room, "action_result", [event])
 
     @app.exception_handler(ServiceError)
     async def service_error_handler(_, exc: ServiceError) -> JSONResponse:
