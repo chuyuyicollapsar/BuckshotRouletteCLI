@@ -1,0 +1,33 @@
+FROM python:3.14-slim AS build
+
+WORKDIR /src
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+ARG PYINSTALLER_VERSION=6.21.0
+
+COPY buckshot_roulette ./buckshot_roulette
+COPY scripts/pyinstaller/buckshot_client_entry.py ./scripts/pyinstaller/buckshot_client_entry.py
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends binutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir "pyinstaller==${PYINSTALLER_VERSION}" \
+    && pyinstaller \
+        --clean \
+        --noconfirm \
+        --onefile \
+        --console \
+        --name buckshot-client \
+        --paths /src \
+        --distpath /out \
+        --workpath /tmp/pyinstaller/work \
+        --specpath /tmp/pyinstaller/spec \
+        scripts/pyinstaller/buckshot_client_entry.py \
+    && chmod +x /out/buckshot-client
+
+FROM scratch AS export
+
+COPY --from=build /out/buckshot-client /buckshot-client

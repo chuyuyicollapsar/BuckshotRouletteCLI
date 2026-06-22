@@ -13,14 +13,22 @@
 
 - Python 3.14+
 - 标准库 `unittest`
-- 后端计划使用 FastAPI + HTTP + WebSocket/SSE
-- LLM 计划通过 LangChain 接入 OpenAI、Anthropic、Gemini、DeepSeek 和第三方兼容服务
+- 后端使用 FastAPI + HTTP + WebSocket/SSE
+- LLM 通过 LangChain 接入 OpenAI、Anthropic、Gemini、DeepSeek 和第三方兼容服务
 
 ## 文档
 
 - [游戏引擎设计](docs/游戏引擎设计.md)：核心规则、领域模型和 `GameEngine` 边界。
 - [后端架构设计](docs/后端架构设计.md)：房间管理、HTTP API、事件推送、CLI 入口和 AI 玩家调度。
 - [LLM API 需求设计](docs/LLMAPI需求设计.md)：provider、模型预设、AI 玩家预设、结构化输出和保底策略。
+- [部署指南](docs/部署指南.md)：服务端 Docker、客户端独立程序、镜像分发和升级流程。
+
+## 架构原则
+
+- `GameEngine` 只处理游戏规则，不依赖 HTTP、CLI、LLM。
+- 联机模式下，权威 `GameState` 只存在于后端。
+- CLI 是客户端入口，负责展示状态和提交玩家意图。
+- LLM 只作为服务端内部 AI 玩家决策器，模型输出必须经过后端校验后才能进入游戏引擎。
 
 ## 开发
 
@@ -95,9 +103,79 @@ LLM/API 配置会保存到 `llm_config.json`。默认位置：
 
 AI 玩家不走 CLI/HTTP 行动协议。轮到 AI 时，服务端会构造该 AI 可见状态、请求单步决策、复用后端行动校验并写入事件日志；如果 AI 返回非法行动或 provider 失败，会使用保底开枪策略。
 
-## 架构原则
+## 构建与使用
 
-- `GameEngine` 只处理游戏规则，不依赖 HTTP、CLI、LLM。
-- 联机模式下，权威 `GameState` 只存在于后端。
-- CLI 是客户端入口，负责展示状态和提交玩家意图。
-- LLM 只作为服务端内部 AI 玩家决策器，模型输出必须经过后端校验后才能进入游戏引擎。
+### 服务端 Docker
+
+本地有项目源码时，打开 Docker Desktop 后，在项目根目录执行：
+
+```bash
+docker compose up -d --build
+```
+
+这会构建服务端镜像并启动容器：
+
+```text
+image:     buckshot-roulette-server:0.1.0
+container: buckshot-roulette-server
+port:      127.0.0.1:8000
+```
+
+验证服务：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+容器启动后，可以在 Docker Desktop 的 Containers 页面管理 `buckshot-roulette-server`，包括 Start、Stop、Restart 和查看日志。
+
+如果要把服务端分发给服主，推荐发布镜像：
+
+```bash
+docker build -t buckshot-roulette-server:0.1.0 .
+docker tag buckshot-roulette-server:0.1.0 yourname/buckshot-roulette-server:0.1.0
+docker push yourname/buckshot-roulette-server:0.1.0
+```
+
+服主获取并运行：
+
+```bash
+docker pull yourname/buckshot-roulette-server:0.1.0
+docker run -d --name buckshot-roulette-server --restart unless-stopped -p 8000:8000 -v buckshot-data:/data yourname/buckshot-roulette-server:0.1.0
+```
+
+### 客户端独立程序
+
+Windows 客户端：
+
+```powershell
+.\scripts\build_client_windows.ps1
+.\dist\client\windows\buckshot-client.exe --server http://127.0.0.1:8000 --name Alice
+```
+
+Linux 客户端：
+
+```powershell
+.\scripts\build_client_linux.ps1
+```
+
+在 Linux / WSL 中运行：
+
+```bash
+/mnt/c/swnfv/code/BuckshotRouletteCLI/dist/client/linux/buckshot-client --server http://127.0.0.1:8000 --name Alice
+```
+
+客户端构建产物位于：
+
+```text
+dist/client/windows/buckshot-client.exe
+dist/client/linux/buckshot-client
+```
+
+`dist/` 和 `build/` 是构建输出目录。修改客户端代码后，重新运行对应构建脚本即可生成新的客户端程序。
