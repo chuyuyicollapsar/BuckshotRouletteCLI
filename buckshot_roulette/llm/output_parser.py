@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from typing import Any
 
@@ -7,7 +8,17 @@ from buckshot_roulette.llm.models import SingleActionDecision
 
 
 class OutputParserError(ValueError):
-    pass
+    def __init__(self, message: str, raw_output: Any | None = None) -> None:
+        self.raw_output_preview = self._preview(raw_output)
+        if self.raw_output_preview:
+            message = f"{message} raw_output_preview={self.raw_output_preview!r}"
+        super().__init__(message)
+
+    def _preview(self, raw_output: Any | None) -> str:
+        if raw_output is None:
+            return ""
+        text = str(raw_output).replace("\r", "\\r").replace("\n", "\\n")
+        return text[:500]
 
 
 class OutputParser:
@@ -19,18 +30,20 @@ class OutputParser:
                 data = self._parse_embedded_json(output, exc)
         else:
             data = output
+        if isinstance(data, str):
+            return self.parse(data)
         if not isinstance(data, dict):
-            raise OutputParserError("模型输出必须是 JSON object。")
+            raise OutputParserError("模型输出必须是 JSON object。", output)
         action = data.get("action")
         if not isinstance(action, dict):
-            raise OutputParserError("模型输出缺少 action object。")
+            raise OutputParserError("模型输出缺少 action object。", output)
         action_type = action.get("type")
         if action_type not in {"shoot_self", "shoot_player", "use_item"}:
-            raise OutputParserError("模型输出 action.type 无效。")
+            raise OutputParserError("模型输出 action.type 无效。", output)
         if action_type == "shoot_player" and "target_player_id" not in action:
-            raise OutputParserError("shoot_player 缺少 target_player_id。")
+            raise OutputParserError("shoot_player 缺少 target_player_id。", output)
         if action_type == "use_item" and "item" not in action:
-            raise OutputParserError("use_item 缺少 item。")
+            raise OutputParserError("use_item 缺少 item。", output)
         thought = data.get("thought_summary", "")
         if not isinstance(thought, str):
             thought = str(thought)
@@ -41,11 +54,17 @@ class OutputParser:
     ) -> Any:
         json_text = self._extract_json_object(output)
         if json_text is None:
-            raise OutputParserError("模型输出不是有效 JSON。") from original_error
+            literal = self._parse_python_literal(output)
+            if literal is not None:
+                return literal
+            raise OutputParserError("模型输出不是有效 JSON。", output) from original_error
         try:
             return json.loads(json_text)
         except json.JSONDecodeError as exc:
-            raise OutputParserError("模型输出不是有效 JSON。") from exc
+            literal = self._parse_python_literal(json_text)
+            if literal is not None:
+                return literal
+            raise OutputParserError("模型输出不是有效 JSON。", output) from exc
 
     def _extract_json_object(self, output: str) -> str | None:
         start = output.find("{")
@@ -75,3 +94,10 @@ class OutputParser:
                 if depth == 0:
                     return output[start : index + 1]
         return None
+
+    def _parse_python_literal(self, output: str) -> Any | None:
+        try:
+            data = ast.literal_eval(output.strip())
+        except (SyntaxError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None

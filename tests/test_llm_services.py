@@ -92,6 +92,23 @@ class LLMServiceTests(unittest.TestCase):
             {"type": "shoot_player", "target_player_id": 0},
         )
 
+    def test_output_parser_accepts_python_dict_literal(self):
+        parser = OutputParser()
+
+        decision = parser.parse(
+            "{'thought_summary': 'x', 'action': {'type': 'shoot_self'}}"
+        )
+
+        self.assertEqual(decision.action, {"type": "shoot_self"})
+
+    def test_output_parser_error_includes_raw_preview(self):
+        parser = OutputParser()
+
+        with self.assertRaises(OutputParserError) as context:
+            parser.parse("I choose to shoot myself.")
+
+        self.assertIn("raw_output_preview", str(context.exception))
+
     def test_fake_decision_service_returns_legal_action(self):
         store = LLMConfigStore()
         decision_service = LLMDecisionService(store)

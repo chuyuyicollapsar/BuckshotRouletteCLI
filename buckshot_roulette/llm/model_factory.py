@@ -58,11 +58,14 @@ class LangChainChatModelAdapter:
         system_prompt = (
             "You are an AI player for a Buckshot Roulette game. "
             "Return exactly one JSON object with keys thought_summary and action. "
+            "Do not use markdown fences, prose, XML tags, or comments. "
             "Use only one action from current_visible_state.legal_actions. "
             "Do not reveal or assume hidden shell order. "
             "Track remaining LIVE/BLANK counts yourself from round_started events "
             "and public shot/item events. If the public history proves the next "
-            "shell is LIVE, prefer shooting an opponent over shooting yourself."
+            "shell is LIVE, prefer shooting an opponent over shooting yourself. "
+            'Example response: {"thought_summary":"Known LIVE; attack.",'
+            '"action":{"type":"shoot_player","target_player_id":0}}'
         )
         if profile_prompt:
             system_prompt = f"{system_prompt}\n\nAI profile:\n{profile_prompt}"
@@ -71,7 +74,12 @@ class LangChainChatModelAdapter:
             ("human", json.dumps(context, ensure_ascii=False)),
         ]
         response = self.model.invoke(messages)
+        tool_calls = getattr(response, "tool_calls", None)
+        if tool_calls:
+            return json.dumps(tool_calls, ensure_ascii=False)
         content = getattr(response, "content", response)
+        if isinstance(content, dict):
+            return json.dumps(content, ensure_ascii=False)
         if isinstance(content, list):
             return self._content_blocks_to_text(content)
         return str(content)
@@ -81,8 +89,13 @@ class LangChainChatModelAdapter:
         for block in blocks:
             if isinstance(block, str):
                 texts.append(block)
-            elif isinstance(block, dict) and block.get("type") in {"text", "output_text"}:
-                texts.append(str(block.get("text", "")))
+            elif isinstance(block, dict):
+                if block.get("type") in {"text", "output_text"}:
+                    texts.append(str(block.get("text", "")))
+                elif "json" in block:
+                    texts.append(json.dumps(block["json"], ensure_ascii=False))
+                elif "args" in block:
+                    texts.append(json.dumps(block["args"], ensure_ascii=False))
         return "\n".join(texts)
 
 
