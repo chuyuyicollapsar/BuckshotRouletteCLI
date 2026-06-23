@@ -21,15 +21,16 @@ from .renderer import (
 from .websocket_client import WebSocketClient, WebSocketError
 
 
-GAME_COMMAND_HINT = "Enter/r 获取事件 | i 玩家信息 | c 聊天 | q 退出"
-ACTION_COMMAND_HINT = "输入编号执行 | a 行动列表 | Enter/r 获取事件 | i 玩家信息 | c 聊天 | q 退出"
-COMMAND_PROMPT = "命令 > "
+GAME_COMMAND_HINT = "a 行动列表 | i 玩家信息 | c 聊天 | r 同步 | q 退出"
+ACTION_COMMAND_HINT = "a 行动列表 | i 玩家信息 | c 聊天 | r 同步 | q 退出"
+COMMAND_PROMPT = "> "
 
 
 class TerminalCommandPrompt:
     def __init__(self, help_text: str) -> None:
         self.help_text = help_text
         self._buffer: list[str] = []
+        self._mounted = False
 
     def append(self, char: str) -> None:
         self._buffer.append(char)
@@ -43,14 +44,22 @@ class TerminalCommandPrompt:
 
     def render(self) -> None:
         text = self.value()
-        sys.stdout.write(f"\r\x1b[2K{COMMAND_PROMPT}{text}")
+        if self._mounted:
+            sys.stdout.write("\x1b[2A\r\x1b[2K")
+        else:
+            self._mounted = True
+        sys.stdout.write(f"\n\r\x1b[2K{COMMAND_PROMPT}{text}")
+        sys.stdout.write(f"\n\r\x1b[2K")
         sys.stdout.write(f"\n\r\x1b[2K{self.help_text}")
-        sys.stdout.write(f"\x1b[1A\r{COMMAND_PROMPT}{text}")
+        sys.stdout.write(f"\x1b[2A\r{COMMAND_PROMPT}{text}")
         sys.stdout.flush()
 
     def clear(self) -> None:
-        sys.stdout.write("\r\x1b[2K\n\r\x1b[2K\x1b[1A\r")
+        if not self._mounted:
+            return
+        sys.stdout.write("\x1b[2A\r\x1b[2K\n\r\x1b[2K\n\r\x1b[2K\x1b[2A\r")
         sys.stdout.flush()
+        self._mounted = False
 
 
 _TERMINAL_LOCK = threading.RLock()
@@ -409,8 +418,10 @@ class CliApp:
             print("\n等待状态同步。")
             choice = prompt_command(GAME_COMMAND_HINT)
             try:
-                if choice in {"", "r"}:
+                if choice == "r":
                     session.refresh(print_updates=True)
+                elif choice == "":
+                    pass
                 elif choice == "i":
                     self._print_player_info(session)
                 elif choice == "c":
@@ -436,8 +447,10 @@ class CliApp:
         print(f"\n等待 [{current_id}] 行动。")
         choice = prompt_command(GAME_COMMAND_HINT)
         try:
-            if choice in {"", "r"}:
+            if choice == "r":
                 session.refresh(print_updates=True)
+            elif choice == "":
+                pass
             elif choice == "i":
                 self._print_player_info(session)
             elif choice == "c":
@@ -469,8 +482,10 @@ class CliApp:
             if choice == "i":
                 self._print_player_info(session)
                 return False
-            if choice in {"r", ""}:
+            if choice == "r":
                 session.refresh(print_updates=True)
+                return False
+            if choice == "":
                 return False
             if choice == "q":
                 session.close()
