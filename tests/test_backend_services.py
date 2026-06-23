@@ -86,6 +86,49 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual(round_event.payload["blank_count"], 1)
         self.assertIn({"type": "shoot_self"}, visible.legal_actions)
 
+    def test_round_start_deals_items_before_shell_reveal_in_turn_order(self):
+        config = MatchConfig(
+            fixed_initial_hp=3,
+            fixed_shell_sequence=(ShellType.BLANK, ShellType.LIVE),
+            enabled_items=frozenset({ItemType.BEER}),
+            items_per_reload=2,
+        )
+        _, _, room_service, coordinator, room, owner = self.make_services(config)
+        room, bob = room_service.join_room(room.room_code, "Bob")
+        room_service.set_ready(room.room_code, bob.token, True)
+
+        _, events = coordinator.start_game(room.room_code, owner.token)
+
+        self.assertEqual([event.event_type for event in events], [
+            "game_started",
+            "match_started",
+            "item_dealt",
+            "item_dealt",
+            "item_dealt",
+            "item_dealt",
+            "round_started",
+        ])
+        dealt_events = [event for event in events if event.event_type == "item_dealt"]
+        self.assertEqual([event.actor_player_id for event in dealt_events], [
+            None,
+            None,
+            None,
+            None,
+        ])
+        self.assertEqual([event.message for event in dealt_events], [
+            "Alice 获得啤酒。",
+            "Bob 获得啤酒。",
+            "Alice 获得啤酒。",
+            "Bob 获得啤酒。",
+        ])
+        self.assertEqual([event.payload for event in dealt_events], [
+            {"player_id": 0, "item": "BEER", "item_index": 0},
+            {"player_id": 1, "item": "BEER", "item_index": 0},
+            {"player_id": 0, "item": "BEER", "item_index": 1},
+            {"player_id": 1, "item": "BEER", "item_index": 1},
+        ])
+        self.assertEqual(events[-1].event_type, "round_started")
+
     def test_only_current_player_can_submit_action(self):
         config = MatchConfig(
             fixed_initial_hp=3,

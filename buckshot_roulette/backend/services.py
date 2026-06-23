@@ -34,6 +34,7 @@ from buckshot_roulette.models import (
     ItemType,
     MatchConfig,
     MatchState,
+    Player,
     item_label,
 )
 
@@ -569,7 +570,8 @@ class TurnCoordinator:
     def _start_round(self, session: GameSession, match: MatchState) -> list[GameEvent]:
         round_result = self.engine.start_round(match)
         session.revision += 1
-        events = [
+        events = self._item_dealt_events(session, match, round_result.dealt_items)
+        events.append(
             self.session_service.append_event(
                 session,
                 event_type="round_started",
@@ -588,8 +590,51 @@ class TurnCoordinator:
                     },
                 },
             )
-        ]
+        )
         return events
+
+    def _item_dealt_events(
+        self,
+        session: GameSession,
+        match: MatchState,
+        dealt_items: dict[int, list[ItemType]],
+    ) -> list[GameEvent]:
+        events: list[GameEvent] = []
+        if not dealt_items:
+            return events
+        for item_index in range(max(len(items) for items in dealt_items.values())):
+            for player in self._players_in_turn_order(match):
+                items = dealt_items.get(player.id, [])
+                if item_index >= len(items):
+                    continue
+                item = items[item_index]
+                events.append(
+                    self.session_service.append_event(
+                        session,
+                        event_type="item_dealt",
+                        message=f"{player.name} 获得{item_label(item)}。",
+                        payload={
+                            "player_id": player.id,
+                            "item": item.value,
+                            "item_index": len(player.items)
+                            - len(items)
+                            + item_index,
+                        },
+                    )
+                )
+        return events
+
+    def _players_in_turn_order(self, match: MatchState) -> list[Player]:
+        ordered: list[Player] = []
+        players = match.players
+        for offset in range(len(players)):
+            idx = (
+                match.current_player_idx + offset * match.turn_direction
+            ) % len(players)
+            player = players[idx]
+            if player.alive:
+                ordered.append(player)
+        return ordered
 
     def _finish_match_if_needed(
         self, room: Room, session: GameSession, match: MatchState
