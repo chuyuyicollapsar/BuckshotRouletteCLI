@@ -63,7 +63,7 @@ class LLMContextBuilder:
         trigger_event: GameEvent,
         *,
         max_chat_events: int = 20,
-        max_game_events: int = 8,
+        max_game_events: int = 50,
     ) -> dict:
         snapshot = room_player.ai_preset_snapshot
         chat_events = [

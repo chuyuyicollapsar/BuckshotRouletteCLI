@@ -102,6 +102,11 @@ class LangChainChatModelAdapter:
             "Keep the reply short, in character, and under the configured limit. "
             "Do not submit game actions, do not output action JSON, and do not "
             "claim hidden shell order or private item results. "
+            "When the player asks about the game state or reviews shell history, "
+            "check public_game_context.recent_game_events before replying. "
+            "Track public LIVE/BLANK counts from reload events and public shot/item "
+            "results. If the public events prove the player's conclusion, admit it "
+            "plainly instead of bluffing or contradicting public facts. "
             'Example response: {"reply":"Hard to say yet, but pressure is rising."}'
         )
         if profile_prompt:
