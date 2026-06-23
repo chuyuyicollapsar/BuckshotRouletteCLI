@@ -877,7 +877,7 @@ RUN_LLM_API_TESTS=1 pytest tests/integration/test_llm_providers.py
 9. 实现 `LLMChatService` 和聊天触发链路
 10. 接入 `TurnCoordinator`，轮到 AI 玩家时自动行动
 11. 增加 CLI：`ai list`、`room create --ai`、`room add-ai`
-10. 最后接真实官方 provider 的集成测试
+12. 最后接真实官方 provider 的集成测试
 
 ## 11. 参考资料
 

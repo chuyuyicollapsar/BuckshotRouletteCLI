@@ -28,3 +28,6 @@ llm = [
 [project.scripts]
 buckshot-server = "buckshot_roulette.server:main"
 buckshot-client = "buckshot_roulette.cli.main:main"
+
+[tool.setuptools.package-data]
+"buckshot_roulette.llm.prompts" = ["*.md"]

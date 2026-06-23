@@ -22,6 +22,12 @@ from buckshot_roulette.llm.models import (
     SingleActionDecision,
 )
 from buckshot_roulette.llm.output_parser import OutputParser, OutputParserError
+from buckshot_roulette.llm.prompt_library import (
+    DEFAULT_DECISION_PROMPT_ID,
+    DEFAULT_RULES_PROMPT_ID,
+    PromptLibrary,
+    PromptLibraryError,
+)
 from buckshot_roulette.llm.repositories import LLMConfigStore
 
 
@@ -47,10 +53,12 @@ class LLMAdminService:
         store: LLMConfigStore,
         model_factory: LangChainModelFactory | None = None,
         output_parser: OutputParser | None = None,
+        prompt_library: PromptLibrary | None = None,
     ) -> None:
         self.store = store
         self.model_factory = model_factory or LangChainModelFactory()
         self.output_parser = output_parser or OutputParser()
+        self.prompt_library = prompt_library or PromptLibrary()
 
     def create_provider(self, data: dict) -> ProviderConfig:
         provider = ProviderConfig(
@@ -90,6 +98,18 @@ class LLMAdminService:
             display_name=str(data.get("display_name") or data["id"]),
             enabled=bool(data.get("enabled", True)),
             model_preset_id=str(data["model_preset_id"]),
+            rules_prompt_id=str(
+                data.get("rules_prompt_id") or DEFAULT_RULES_PROMPT_ID
+            ),
+            decision_prompt_id=str(
+                data.get("decision_prompt_id") or DEFAULT_DECISION_PROMPT_ID
+            ),
+            custom_rules_prompt=self._optional_prompt_text(
+                data.get("custom_rules_prompt")
+            ),
+            custom_decision_prompt=self._optional_prompt_text(
+                data.get("custom_decision_prompt")
+            ),
             persona_prompt=str(data.get("persona_prompt", "")),
             strategy_prompt=str(data.get("strategy_prompt", "")),
             max_item_actions_per_turn=int(data.get("max_item_actions_per_turn", 8)),
@@ -113,6 +133,14 @@ class LLMAdminService:
             raise LLMConfigError("AI 玩家预设未启用。")
         model_preset = self.store.get_model_preset(ai_preset.model_preset_id)
         provider = self.store.get_provider(model_preset.provider_id)
+        rules_prompt = self._resolve_prompt(
+            ai_preset.rules_prompt_id,
+            custom_text=ai_preset.custom_rules_prompt,
+        )
+        decision_prompt = self._resolve_prompt(
+            ai_preset.decision_prompt_id,
+            custom_text=ai_preset.custom_decision_prompt,
+        )
         model_snapshot = ModelPresetSnapshot(
             preset_id=model_preset.id,
             preset_version=model_preset.version,
@@ -131,6 +159,8 @@ class LLMAdminService:
             preset_version=ai_preset.version,
             display_name=ai_preset.display_name,
             model_preset_snapshot=model_snapshot,
+            rules_prompt=rules_prompt,
+            decision_prompt=decision_prompt,
             persona_prompt=ai_preset.persona_prompt,
             strategy_prompt=ai_preset.strategy_prompt,
             max_item_actions_per_turn=ai_preset.max_item_actions_per_turn,
@@ -270,12 +300,32 @@ class LLMAdminService:
         if preset.max_illegal_actions_per_turn < 0:
             raise LLMConfigError("max_illegal_actions_per_turn 不能为负。")
 
+        self._resolve_prompt(
+            preset.rules_prompt_id,
+            custom_text=preset.custom_rules_prompt,
+        )
+        self._resolve_prompt(
+            preset.decision_prompt_id,
+            custom_text=preset.custom_decision_prompt,
+        )
+
     def _resolve_secret(self, provider: ProviderConfig) -> str | None:
         if provider.api_key_env:
             value = os.getenv(provider.api_key_env)
             if value:
                 return value
         return provider.api_key
+
+    def _optional_prompt_text(self, value: object) -> str | None:
+        if value is None:
+            return None
+        return str(value)
+
+    def _resolve_prompt(self, prompt_id: str, *, custom_text: str | None) -> str:
+        try:
+            return self.prompt_library.resolve(prompt_id, custom_text=custom_text)
+        except PromptLibraryError as exc:
+            raise LLMConfigError(str(exc)) from exc
 
 
 class LLMDecisionService:

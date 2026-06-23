@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from buckshot_roulette.llm.prompt_library import (
+    DEFAULT_DECISION_PROMPT_ID,
+    DEFAULT_RULES_PROMPT_ID,
+)
+
 
 class ProviderType(str, Enum):
     OFFICIAL = "official"
@@ -76,6 +81,10 @@ class AIPlayerPreset:
     enabled: bool
     model_preset_id: str
     version: int = 1
+    rules_prompt_id: str = DEFAULT_RULES_PROMPT_ID
+    decision_prompt_id: str = DEFAULT_DECISION_PROMPT_ID
+    custom_rules_prompt: str | None = None
+    custom_decision_prompt: str | None = None
     persona_prompt: str = ""
     strategy_prompt: str = ""
     max_item_actions_per_turn: int = 8
@@ -90,6 +99,8 @@ class AIPlayerPresetSnapshot:
     preset_version: int
     display_name: str
     model_preset_snapshot: ModelPresetSnapshot
+    rules_prompt: str
+    decision_prompt: str
     persona_prompt: str
     strategy_prompt: str
     max_item_actions_per_turn: int

@@ -5,6 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from buckshot_roulette.llm.prompt_library import (
+    DEFAULT_DECISION_PROMPT_ID,
+    DEFAULT_RULES_PROMPT_ID,
+)
+
 
 class ErrorResponse(BaseModel):
     detail: str
@@ -164,6 +169,10 @@ class AIPlayerPresetRequest(BaseModel):
     display_name: str | None = None
     enabled: bool = True
     model_preset_id: str
+    rules_prompt_id: str = DEFAULT_RULES_PROMPT_ID
+    decision_prompt_id: str = DEFAULT_DECISION_PROMPT_ID
+    custom_rules_prompt: str | None = None
+    custom_decision_prompt: str | None = None
     persona_prompt: str = ""
     strategy_prompt: str = ""
     max_item_actions_per_turn: int = 8

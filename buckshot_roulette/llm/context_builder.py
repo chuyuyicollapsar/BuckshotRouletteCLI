@@ -16,17 +16,22 @@ class LLMContextBuilder:
         max_events: int = 50,
     ) -> dict:
         visible_events = self._visible_events(session.event_log, room_player.seat_index)
+        snapshot = room_player.ai_preset_snapshot
         return {
             "ai_profile": {
-                "display_name": room_player.ai_preset_snapshot.display_name
-                if room_player.ai_preset_snapshot is not None
-                else room_player.name,
-                "persona_prompt": room_player.ai_preset_snapshot.persona_prompt
-                if room_player.ai_preset_snapshot is not None
-                else "",
-                "strategy_prompt": room_player.ai_preset_snapshot.strategy_prompt
-                if room_player.ai_preset_snapshot is not None
-                else "",
+                "display_name": (
+                    snapshot.display_name if snapshot is not None else room_player.name
+                ),
+                "rules_prompt": snapshot.rules_prompt if snapshot is not None else "",
+                "decision_prompt": (
+                    snapshot.decision_prompt if snapshot is not None else ""
+                ),
+                "persona_prompt": (
+                    snapshot.persona_prompt if snapshot is not None else ""
+                ),
+                "strategy_prompt": (
+                    snapshot.strategy_prompt if snapshot is not None else ""
+                ),
             },
             "initial_info_memory": {
                 "game_id": session.id,

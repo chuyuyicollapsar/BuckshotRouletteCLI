@@ -472,6 +472,8 @@ class BackendServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(context["ai_profile"]["display_name"], "Fake Cautious")
+        self.assertIn("一场比赛包含 3 局游戏", context["ai_profile"]["rules_prompt"])
+        self.assertIn("射击对方是最佳策略", context["ai_profile"]["decision_prompt"])
         self.assertIn("deterministic fake player", context["ai_profile"]["persona_prompt"])
 
     def test_admin_ai_action_test_accepts_custom_context(self):

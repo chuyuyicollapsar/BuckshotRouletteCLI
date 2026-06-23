@@ -14,6 +14,10 @@ from buckshot_roulette.llm.models import (
     ProviderProtocol,
     ProviderType,
 )
+from buckshot_roulette.llm.prompt_library import (
+    DEFAULT_DECISION_PROMPT_ID,
+    DEFAULT_RULES_PROMPT_ID,
+)
 from buckshot_roulette.llm.serializers import (
     ai_player_preset_to_dict,
     model_preset_to_dict,
@@ -324,6 +328,12 @@ def _ai_player_preset_from_dict(preset_id: str, raw: Any) -> AIPlayerPreset:
         enabled=enabled,
         model_preset_id=str(raw["model_preset_id"]),
         version=int(raw.get("version", 1)),
+        rules_prompt_id=str(raw.get("rules_prompt_id") or DEFAULT_RULES_PROMPT_ID),
+        decision_prompt_id=str(
+            raw.get("decision_prompt_id") or DEFAULT_DECISION_PROMPT_ID
+        ),
+        custom_rules_prompt=_optional_string(raw.get("custom_rules_prompt")),
+        custom_decision_prompt=_optional_string(raw.get("custom_decision_prompt")),
         persona_prompt=str(raw.get("persona_prompt", "")),
         strategy_prompt=str(raw.get("strategy_prompt", "")),
         max_item_actions_per_turn=int(raw.get("max_item_actions_per_turn", 8)),
@@ -333,3 +343,9 @@ def _ai_player_preset_from_dict(preset_id: str, raw: Any) -> AIPlayerPreset:
             raw.get("fallback_policy", FallbackPolicy.CONSERVATIVE_SHOT.value)
         ),
     )
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)

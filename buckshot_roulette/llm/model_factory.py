@@ -48,12 +48,14 @@ class LangChainChatModelAdapter:
     def invoke(self, context: dict) -> str:
         ai_profile = context.get("ai_profile") or {}
         profile_prompt = "\n".join(
-            part
-            for part in [
-                str(ai_profile.get("persona_prompt") or "").strip(),
-                str(ai_profile.get("strategy_prompt") or "").strip(),
+            self._prompt_section(label, ai_profile.get(key))
+            for label, key in [
+                ("Game rules", "rules_prompt"),
+                ("Decision hints", "decision_prompt"),
+                ("Persona", "persona_prompt"),
+                ("Strategy", "strategy_prompt"),
             ]
-            if part
+            if str(ai_profile.get(key) or "").strip()
         )
         system_prompt = (
             "You are an AI player for a Buckshot Roulette game. "
@@ -85,6 +87,9 @@ class LangChainChatModelAdapter:
         if isinstance(content, list):
             return self._content_blocks_to_text(content)
         return str(content)
+
+    def _prompt_section(self, label: str, value: Any) -> str:
+        return f"{label}:\n{str(value).strip()}"
 
     def _raise_if_only_reasoning_content(self, response: Any, content: Any) -> None:
         if content:

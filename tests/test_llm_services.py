@@ -9,6 +9,7 @@ from buckshot_roulette.llm.model_factory import (
 )
 from buckshot_roulette.llm.models import SingleActionDecision
 from buckshot_roulette.llm.output_parser import OutputParser, OutputParserError
+from buckshot_roulette.llm.prompt_library import PromptLibrary
 from buckshot_roulette.llm.repositories import LLMConfigStore
 from buckshot_roulette.llm.serializers import provider_to_public_dict
 from buckshot_roulette.llm.services import LLMAdminService, LLMConfigError, LLMDecisionService
@@ -52,6 +53,58 @@ class LLMServiceTests(unittest.TestCase):
         self.assertEqual(snapshot.model_preset_snapshot.model_name, "fake-buckshot-player")
         self.assertEqual(new_snapshot.model_preset_snapshot.preset_version, 2)
         self.assertEqual(new_snapshot.model_preset_snapshot.model_name, "fake-updated")
+
+    def test_prompt_library_resolves_builtin_prompts(self):
+        library = PromptLibrary()
+
+        rules_prompt = library.resolve("builtin:ai_game_rules_v1")
+        decision_prompt = library.resolve("builtin:ai_decision_hints_v1")
+
+        self.assertIn("一场比赛包含 3 局游戏", rules_prompt)
+        self.assertIn("射击对方是最佳策略", decision_prompt)
+
+    def test_ai_snapshot_freezes_builtin_prompt_text(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+
+        snapshot = admin.create_ai_snapshot("fake_cautious")
+
+        self.assertIn("可见信息边界", snapshot.rules_prompt)
+        self.assertIn("特定局面决策", snapshot.decision_prompt)
+
+    def test_custom_prompts_override_builtin_prompt_text(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+        admin.create_ai_player_preset(
+            {
+                "id": "custom_ai",
+                "display_name": "Custom AI",
+                "enabled": True,
+                "model_preset_id": "fake_default",
+                "custom_rules_prompt": "custom rules",
+                "custom_decision_prompt": "custom decision hints",
+            }
+        )
+
+        snapshot = admin.create_ai_snapshot("custom_ai")
+
+        self.assertEqual(snapshot.rules_prompt, "custom rules")
+        self.assertEqual(snapshot.decision_prompt, "custom decision hints")
+
+    def test_unknown_prompt_id_is_rejected(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+
+        with self.assertRaises(LLMConfigError):
+            admin.create_ai_player_preset(
+                {
+                    "id": "bad_prompt",
+                    "display_name": "Bad Prompt",
+                    "enabled": True,
+                    "model_preset_id": "fake_default",
+                    "rules_prompt_id": "builtin:missing",
+                }
+            )
 
     def test_extra_field_allowlist_rejects_unknown_fields(self):
         store = LLMConfigStore()
@@ -137,6 +190,34 @@ class LLMServiceTests(unittest.TestCase):
             adapter.invoke({"current_visible_state": {"legal_actions": []}})
 
         self.assertIn("只返回 reasoning_content", str(context.exception))
+
+    def test_langchain_adapter_includes_prompt_sections(self):
+        captured = {}
+
+        class DummyModel:
+            def invoke(self, messages):
+                captured["messages"] = messages
+                return '{"thought_summary":"x","action":{"type":"shoot_self"}}'
+
+        adapter = LangChainChatModelAdapter(DummyModel())
+
+        adapter.invoke(
+            {
+                "ai_profile": {
+                    "rules_prompt": "rules text",
+                    "decision_prompt": "decision text",
+                    "persona_prompt": "persona text",
+                    "strategy_prompt": "strategy text",
+                },
+                "current_visible_state": {"legal_actions": [{"type": "shoot_self"}]},
+            }
+        )
+
+        system_prompt = captured["messages"][0][1]
+        self.assertIn("Game rules:\nrules text", system_prompt)
+        self.assertIn("Decision hints:\ndecision text", system_prompt)
+        self.assertIn("Persona:\npersona text", system_prompt)
+        self.assertIn("Strategy:\nstrategy text", system_prompt)
 
     def test_fake_decision_service_returns_legal_action(self):
         store = LLMConfigStore()

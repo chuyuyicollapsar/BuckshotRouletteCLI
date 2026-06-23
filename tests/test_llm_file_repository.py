@@ -36,6 +36,14 @@ class LLMFileRepositoryTests(unittest.TestCase):
                 payload["ai_player_presets"]["fake_cautious"]["fallback_policy"],
                 "conservative_shot",
             )
+            self.assertEqual(
+                payload["ai_player_presets"]["fake_cautious"]["rules_prompt_id"],
+                "builtin:ai_game_rules_v1",
+            )
+            self.assertEqual(
+                payload["ai_player_presets"]["fake_cautious"]["decision_prompt_id"],
+                "builtin:ai_decision_hints_v1",
+            )
 
     def test_upsert_provider_persists_private_config_and_reloads(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -116,6 +124,70 @@ class LLMFileRepositoryTests(unittest.TestCase):
             self.assertIn("fake_local", store.providers)
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertIn("fake_cautious", payload["ai_player_presets"])
+
+    def test_old_ai_player_preset_config_loads_prompt_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "llm_config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "providers": {
+                            "fake_local": {
+                                "id": "fake_local",
+                                "display_name": "Fake Local",
+                                "type": "official",
+                                "protocol": "fake",
+                                "base_url": None,
+                                "api_key_env": None,
+                                "api_key": None,
+                                "class_path": None,
+                                "kwargs": {},
+                            }
+                        },
+                        "model_presets": {
+                            "fake_default": {
+                                "id": "fake_default",
+                                "display_name": "Fake Default",
+                                "provider_id": "fake_local",
+                                "model_name": "fake-buckshot-player",
+                                "version": 1,
+                                "temperature": 0.0,
+                                "max_tokens": 200,
+                                "reasoning_effort": None,
+                                "timeout_seconds": 30,
+                                "max_retries": 2,
+                                "extra": {},
+                            }
+                        },
+                        "ai_player_presets": {
+                            "fake_cautious": {
+                                "id": "fake_cautious",
+                                "display_name": "Fake Cautious",
+                                "enabled": True,
+                                "model_preset_id": "fake_default",
+                                "version": 1,
+                                "persona_prompt": "old persona",
+                                "strategy_prompt": "old strategy",
+                                "max_item_actions_per_turn": 8,
+                                "max_parse_failures_per_turn": 2,
+                                "max_illegal_actions_per_turn": 2,
+                                "fallback_policy": "conservative_shot",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = FileBackedLLMConfigStore(path)
+            preset = store.get_ai_player_preset("fake_cautious")
+
+            self.assertEqual(preset.rules_prompt_id, "builtin:ai_game_rules_v1")
+            self.assertEqual(
+                preset.decision_prompt_id,
+                "builtin:ai_decision_hints_v1",
+            )
 
     def test_invalid_json_raises_clear_error(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
