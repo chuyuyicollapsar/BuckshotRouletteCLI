@@ -19,6 +19,11 @@ from .renderer import (
 from .websocket_client import WebSocketClient, WebSocketError
 
 
+GAME_COMMAND_HINT = "提示：Enter/r 刷新 | c 聊天 | q 退出"
+ACTION_COMMAND_HINT = "提示：输入行动编号执行 | Enter/r 刷新 | c 聊天 | q 退出"
+COMMAND_PROMPT = "命令 > "
+
+
 class RoomSession:
     def __init__(
         self,
@@ -372,7 +377,7 @@ class CliApp:
     ) -> bool:
         if state is None:
             print("\n等待状态同步。")
-            choice = input("回车刷新，c 聊天，q 断开：").strip().lower()
+            choice = prompt_command(GAME_COMMAND_HINT)
             try:
                 if choice in {"", "r"}:
                     session.refresh(print_updates=True)
@@ -397,7 +402,7 @@ class CliApp:
 
         current_id = state.get("current_player_id")
         print(f"\n等待 [{current_id}] 行动。")
-        choice = input("回车刷新，c 聊天，q 断开：").strip().lower()
+        choice = prompt_command(GAME_COMMAND_HINT)
         try:
             if choice in {"", "r"}:
                 session.refresh(print_updates=True)
@@ -422,8 +427,7 @@ class CliApp:
         print("\n可选行动：")
         for index, action in enumerate(actions, start=1):
             print(f"{index}. {action_label(action, state)}")
-        print("c. 聊天    r. 刷新    q. 断开")
-        choice = input("选择：").strip().lower()
+        choice = prompt_command(ACTION_COMMAND_HINT)
         try:
             if choice == "c":
                 self._chat(session)
@@ -574,6 +578,25 @@ def safe_refresh(session: RoomSession) -> None:
         session.refresh()
     except ApiError:
         pass
+
+
+def prompt_command(help_text: str) -> str:
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        print()
+        sys.stdout.write(COMMAND_PROMPT)
+        sys.stdout.write("\n")
+        sys.stdout.write(help_text)
+        sys.stdout.write("\n")
+        sys.stdout.write(f"\x1b[2A\r{COMMAND_PROMPT}")
+        sys.stdout.flush()
+        try:
+            return input().strip().lower()
+        finally:
+            sys.stdout.write("\x1b[1B\r")
+            sys.stdout.flush()
+
+    print(f"\n{help_text}")
+    return input(COMMAND_PROMPT).strip().lower()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
