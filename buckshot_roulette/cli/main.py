@@ -42,11 +42,10 @@ class TerminalCommandPrompt:
 
     def render(self) -> None:
         text = self.value()
-        if self._mounted:
-            sys.stdout.write("\x1b[2A\r\x1b[2K")
-        else:
+        if not self._mounted:
             self._mounted = True
-        sys.stdout.write(f"\n\r\x1b[2K{COMMAND_PROMPT}{text}")
+            sys.stdout.write("\n")
+        sys.stdout.write(f"\r\x1b[2K{COMMAND_PROMPT}{text}")
         sys.stdout.write(f"\n\r\x1b[2K")
         sys.stdout.write(f"\n\r\x1b[2K{self.help_text}")
         sys.stdout.write(f"\x1b[2A\r{COMMAND_PROMPT}{text}")
@@ -55,7 +54,7 @@ class TerminalCommandPrompt:
     def clear(self) -> None:
         if not self._mounted:
             return
-        sys.stdout.write("\x1b[2A\r\x1b[2K\n\r\x1b[2K\n\r\x1b[2K\x1b[2A\r")
+        sys.stdout.write("\r\x1b[2K\n\r\x1b[2K\n\r\x1b[2K\x1b[2A\r")
         sys.stdout.flush()
         self._mounted = False
 

@@ -83,6 +83,23 @@ class EntrypointTests(unittest.TestCase):
         self.assertNotIn("命令 >", output)
         self.assertIsNone(client_main._ACTIVE_COMMAND_PROMPT)
 
+    def test_prompt_command_repaints_from_input_line_while_typing(self):
+        stdout = io.StringIO()
+        keys = iter(["a", "a", "a", "\r"])
+
+        with (
+            patch("sys.stdout", stdout),
+            patch.object(client_main, "is_interactive_terminal", return_value=True),
+            patch.object(client_main, "_raw_terminal_input"),
+            patch.object(client_main, "_read_terminal_key", side_effect=lambda: next(keys)),
+        ):
+            choice = prompt_command(GAME_COMMAND_HINT)
+
+        self.assertEqual(choice, "aaa")
+        output = stdout.getvalue()
+        self.assertNotIn("\x1b[2A\r\x1b[2K", output)
+        self.assertIn(f"{COMMAND_PROMPT}aaa", output)
+
     def test_write_above_command_prompt_restores_active_prompt(self):
         stdout = io.StringIO()
         prompt = TerminalCommandPrompt(GAME_COMMAND_HINT)
