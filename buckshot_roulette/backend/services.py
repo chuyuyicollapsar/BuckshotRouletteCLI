@@ -310,6 +310,7 @@ class TurnCoordinator:
                 },
             )
         )
+        events.extend(self._match_hp_events(session, match))
         events.extend(self._start_round(session, match))
         events.extend(self.run_ai_turns(room, session))
         return session, events
@@ -707,8 +708,32 @@ class TurnCoordinator:
                     },
                 )
             )
+            events.extend(self._match_hp_events(session, new_match))
             events.extend(self._start_round(session, new_match))
         return events
+
+    def _match_hp_events(
+        self, session: GameSession, match: MatchState
+    ) -> list[GameEvent]:
+        initial_hp = match.players[0].max_hp if match.players else 0
+        return [
+            self.session_service.append_event(
+                session,
+                event_type="player_hp_set",
+                message=f"本场游戏玩家的初始生命值为 {initial_hp}。",
+                payload={
+                    "initial_hp": initial_hp,
+                    "players": [
+                        {
+                            "player_id": player.id,
+                            "hp": player.hp,
+                            "max_hp": player.max_hp,
+                        }
+                        for player in match.players
+                    ],
+                },
+            )
+        ]
 
     def _events_from_action_result(
         self, session: GameSession, result: ActionResult

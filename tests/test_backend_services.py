@@ -75,6 +75,7 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual([event.event_type for event in events], [
             "game_started",
             "match_started",
+            "player_hp_set",
             "round_started",
             "turn_started",
         ])
@@ -82,6 +83,16 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual(visible.public_shell_counts["remaining"], 2)
         self.assertNotIn("LIVE", visible.public_shell_counts)
         self.assertNotIn("BLANK", visible.public_shell_counts)
+        hp_events = [event for event in events if event.event_type == "player_hp_set"]
+        self.assertEqual(len(hp_events), 1)
+        self.assertEqual(hp_events[0].message, "本场游戏玩家的初始生命值为 3。")
+        self.assertEqual(hp_events[0].payload, {
+            "initial_hp": 3,
+            "players": [
+                {"player_id": 0, "hp": 3, "max_hp": 3},
+                {"player_id": 1, "hp": 3, "max_hp": 3},
+            ],
+        })
         round_event = events[-2]
         self.assertEqual(round_event.payload["live_count"], 1)
         self.assertEqual(round_event.payload["blank_count"], 1)
@@ -106,6 +117,7 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual([event.event_type for event in events], [
             "game_started",
             "match_started",
+            "player_hp_set",
             "item_dealt",
             "item_dealt",
             "item_dealt",
@@ -181,6 +193,46 @@ class BackendServiceTests(unittest.TestCase):
         )
 
         self.assertEqual([event.event_type for event in events], ["shoot_self"])
+
+    def test_new_match_repeats_hp_events_before_round_events(self):
+        config = MatchConfig(
+            fixed_initial_hp=1,
+            fixed_shell_sequence=(ShellType.LIVE,),
+            items_per_reload=0,
+            matches_per_game=2,
+        )
+        _, _, room_service, coordinator, room, owner = self.make_services(config)
+        room, bob = room_service.join_room(room.room_code, "Bob")
+        room_service.set_ready(room.room_code, bob.token, True)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {"type": "shoot_player", "target_player_id": 1},
+            run_ai_turns=False,
+        )
+
+        self.assertEqual([event.event_type for event in events], [
+            "shoot_player",
+            "action_result",
+            "match_ended",
+            "match_started",
+            "player_hp_set",
+            "round_started",
+            "turn_started",
+        ])
+        hp_events = [event for event in events if event.event_type == "player_hp_set"]
+        self.assertEqual(len(hp_events), 1)
+        self.assertEqual(hp_events[0].message, "本场游戏玩家的初始生命值为 1。")
+        self.assertEqual(hp_events[0].payload, {
+            "initial_hp": 1,
+            "players": [
+                {"player_id": 0, "hp": 1, "max_hp": 1},
+                {"player_id": 1, "hp": 1, "max_hp": 1},
+            ],
+        })
 
     def test_only_current_player_can_submit_action(self):
         config = MatchConfig(
