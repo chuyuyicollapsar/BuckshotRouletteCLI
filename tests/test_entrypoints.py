@@ -7,6 +7,7 @@ import unittest
 import buckshot_roulette.cli.main as client_main
 from buckshot_roulette.cli.main import (
     COMMAND_PROMPT,
+    CliApp,
     GAME_COMMAND_HINT,
     TerminalCommandPrompt,
     parse_args as parse_client_args,
@@ -118,6 +119,24 @@ class EntrypointTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("[事件] 测试", output)
         self.assertIn(f"{COMMAND_PROMPT}c", output)
+
+    def test_game_menu_does_not_print_waiting_status_into_event_stream(self):
+        stdout = io.StringIO()
+        app = CliApp(api=None, player_name="Alice")
+        state = {
+            "player_seat_index": 0,
+            "current_player_id": 1,
+            "legal_actions": [],
+        }
+
+        with (
+            patch("sys.stdout", stdout),
+            patch.object(client_main, "prompt_command", return_value=""),
+        ):
+            should_exit = app._game_menu(session=None, state=state)
+
+        self.assertFalse(should_exit)
+        self.assertNotIn("等待 [1] 行动", stdout.getvalue())
 
 
 if __name__ == "__main__":

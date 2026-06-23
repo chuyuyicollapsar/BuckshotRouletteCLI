@@ -444,8 +444,6 @@ class CliApp:
         if my_turn:
             return self._action_menu(session, state)
 
-        current_id = state.get("current_player_id")
-        print(f"\n等待 [{current_id}] 行动。")
         choice = prompt_command(GAME_COMMAND_HINT)
         try:
             if self._handle_game_command(session, state, choice):
