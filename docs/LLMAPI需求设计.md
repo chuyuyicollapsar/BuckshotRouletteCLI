@@ -48,6 +48,10 @@ ai_player_presets:
   cautious_dealer:
     display_name: Cautious Dealer
     model_preset_id: openai_reasoning_default
+    rules_prompt_id: builtin:ai_game_rules_v1
+    decision_prompt_id: builtin:ai_decision_hints_v1
+    custom_rules_prompt: null
+    custom_decision_prompt: null
     persona_prompt: "You are a careful Buckshot Roulette player."
     strategy_prompt: "Prefer information-gathering items before shooting."
 ```
@@ -218,6 +222,10 @@ llm:
       display_name: Cautious Dealer
       enabled: true
       model_preset_id: openai_reasoning_default
+      rules_prompt_id: builtin:ai_game_rules_v1
+      decision_prompt_id: builtin:ai_decision_hints_v1
+      custom_rules_prompt: null
+      custom_decision_prompt: null
       persona_prompt: "You are a careful Buckshot Roulette player."
       strategy_prompt: "Prefer information-gathering items before high-risk shots."
       chat_enabled: true
@@ -235,6 +243,8 @@ llm:
       display_name: Aggressive Dealer
       enabled: true
       model_preset_id: deepseek_budget
+      rules_prompt_id: builtin:ai_game_rules_v1
+      decision_prompt_id: builtin:ai_decision_hints_v1
       persona_prompt: "You are an aggressive Buckshot Roulette player."
       strategy_prompt: "Prefer pressure and damage when the visible risk is acceptable."
       max_item_actions_per_turn: 6
@@ -245,8 +255,15 @@ llm:
 - 普通 CLI 用户只能选择 `enabled=true` 的 AI 玩家预设
 - CLI 不接收 provider、API Key、base URL 等后台字段
 - 房间添加 AI 玩家时保存 `AIPlayerPreset` 与 `ModelPreset` 的快照
-- 快照包含 `preset_id`、`preset_version`、`model_name`、模型参数、persona、strategy、聊天配置和行动上限
+- 快照包含 `preset_id`、`preset_version`、`model_name`、模型参数、规则文本、决策提示文本、persona、strategy、聊天配置和行动上限
 - 后台编辑预设只影响之后新建的 AI 玩家，不影响正在进行的房间
+
+规则与决策提示文本：
+- `rules_prompt_id` 指向游戏规则提示文本，默认使用内置 `builtin:ai_game_rules_v1`。
+- `decision_prompt_id` 指向决策提示文本，默认使用内置 `builtin:ai_decision_hints_v1`。
+- `custom_rules_prompt` 和 `custom_decision_prompt` 用于后台覆盖内置文本；非空时优先于对应 `*_prompt_id`。
+- `docs/AI游戏规则文本.md` 和 `docs/AI决策提示文本.md` 只是维护和评审用文档，不能作为后端运行时读取路径。
+- 后端运行时必须从 package 内置资源或后台配置读取 prompt 文本，并在添加 AI 玩家时写入快照。
 
 聊天配置规则：
 - `chat_enabled=false` 时，AI 不响应聊天，只参与游戏行动决策。
@@ -266,6 +283,7 @@ CLI 选择 ai_player_preset_id
   -> 后端读取 AIPlayerPreset
   -> 后端读取 AIPlayerPreset.model_preset_id 对应的 ModelPreset
   -> 如果 chat_model_preset_id 非空，后端同时读取聊天模型预设
+  -> PromptLibrary 解析规则文本和决策提示文本
   -> 创建 RoomPlayer.ai_preset_snapshot
   -> AI 回合从快照创建决策模型客户端
   -> AI 聊天从快照创建聊天模型客户端
@@ -296,7 +314,9 @@ python main.py admin ai-preset list
 ```text
 RoomService / TurnCoordinator
   -> AIPlayerController
+    -> PromptLibrary
     -> LLMDecisionService
+    -> LLMChatService
       -> PresetSnapshotResolver
       -> LangChainModelFactory
       -> OutputParser / ActionValidator
@@ -310,7 +330,8 @@ RoomService / TurnCoordinator
 | `AIPlayerController` | 读取房间内 AI 玩家预设快照，发起决策请求 |
 | `LLMDecisionService` | 拼装行动决策提示词、调用模型、解析单步行动、执行反馈循环、重试 |
 | `LLMChatService` | 拼装聊天回复提示词、调用模型、解析短文本回复、限流和兜底 |
-| `PresetSnapshotResolver` | 从 `RoomPlayer.ai_preset_snapshot` 获取模型参数、persona、strategy 和行动上限 |
+| `PromptLibrary` | 从 package 内置资源或后台配置中解析 prompt 文本 |
+| `PresetSnapshotResolver` | 从 `RoomPlayer.ai_preset_snapshot` 获取模型参数、规则文本、决策提示、persona、strategy 和行动上限 |
 | `LangChainModelFactory` | 按快照中的 provider/protocol/model_name 创建 LangChain chat model |
 | `OutputParser` | 将模型输出解析成一个结构化行动 |
 | `ActionValidator` | 用当前游戏规则校验行动是否合法 |
@@ -333,6 +354,14 @@ LLM 调用按用途分为两类：
 核心要求：上下文应接近人类玩家接收的信息模式。系统不应额外整理大量推理统计给模型，而应提供真实发生过的公开游戏信息和当前面板信息，让模型自己从历史事件中推断玩家水平、倾向和可能的下一步行为。
 
 AI 玩家预设中的 `persona_prompt` 和 `strategy_prompt` 可以作为系统提示词的一部分。`ModelPreset` 的 provider、base URL、API Key、后台对象完整配置不能进入模型上下文。
+
+行动决策 system prompt 由这些片段组成：
+- 内置或覆盖后的 `rules_prompt`：游戏规则和可见信息边界。
+- 内置或覆盖后的 `decision_prompt`：通用决策原则和特定局面提示。
+- `persona_prompt`：AI 角色身份。
+- `strategy_prompt`：AI 玩家强度和风格配置。
+
+`rules_prompt` 和 `decision_prompt` 在 AI 加入房间时写入 `AIPlayerPresetSnapshot`，不能在每次 LLM 调用时重新读取 `docs/` 路径。
 
 聊天消息默认不进入行动决策上下文。原因：
 - 聊天内容不属于游戏规则、公开局面或行动事件，容易引入提示注入。
@@ -842,10 +871,12 @@ RUN_LLM_API_TESTS=1 pytest tests/integration/test_llm_providers.py
 3. 实现 `LangChainModelFactory`
 4. 实现 `model-preset test` 和 `ai-preset test-action`
 5. 实现 `initial_info_memory`、`action_event_list`、`current_visible_state` 上下文构造
-6. 实现 fake model 和单步输出解析测试
-7. 实现 `LLMDecisionService` 的单步反馈循环
-8. 接入 `TurnCoordinator`，轮到 AI 玩家时自动行动
-9. 增加 CLI：`ai list`、`room create --ai`、`room add-ai`
+6. 实现 `PromptLibrary`，支持 package 内置 prompt 和后台覆盖文本
+7. 实现 fake model 和单步输出解析测试
+8. 实现 `LLMDecisionService` 的单步反馈循环
+9. 实现 `LLMChatService` 和聊天触发链路
+10. 接入 `TurnCoordinator`，轮到 AI 玩家时自动行动
+11. 增加 CLI：`ai list`、`room create --ai`、`room add-ai`
 10. 最后接真实官方 provider 的集成测试
 
 ## 11. 参考资料
