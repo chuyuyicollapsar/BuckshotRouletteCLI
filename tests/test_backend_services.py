@@ -509,6 +509,35 @@ class BackendServiceTests(unittest.TestCase):
             [event["event_type"] for event in context["action_event_list"]],
         )
 
+    def test_llm_chat_context_includes_visible_player_items(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+        match = session.state.current_match_state
+        match.players[0].items = [ItemType.INVERTER, ItemType.ADRENALINE]
+        match.players[1].items = [ItemType.HAND_SAW]
+        _, trigger_event = coordinator.append_chat(room.room_code, owner.token, "@1 hi")
+        ai_player = room.players[1]
+
+        context = LLMContextBuilder().build_chat_context(
+            room,
+            ai_player,
+            session,
+            trigger_event,
+        )
+
+        players = context["public_game_context"]["players"]
+        self.assertEqual(players[0]["items"], ["INVERTER", "ADRENALINE"])
+        self.assertEqual(players[1]["items"], ["HAND_SAW"])
+
     def test_ai_chat_reply_requires_mention_and_does_not_advance_revision(self):
         config = MatchConfig(
             fixed_initial_hp=2,

@@ -102,11 +102,15 @@ class LangChainChatModelAdapter:
             "Keep the reply short, in character, and under the configured limit. "
             "Do not submit game actions, do not output action JSON, and do not "
             "claim hidden shell order or private item results. "
-            "When the player asks about the game state or reviews shell history, "
-            "check public_game_context.recent_game_events before replying. "
+            "When the player asks about the game state, a lethal line, or reviews "
+            "shell history, check public_game_context before replying. "
             "Track public LIVE/BLANK counts from reload events and public shot/item "
-            "results. If the public events prove the player's conclusion, admit it "
-            "plainly instead of bluffing or contradicting public facts. "
+            "results. Check current_player_id, player hp, visible items, and item "
+            "combos such as INVERTER, ADRENALINE, HAND_SAW, and BEER. Treat private "
+            "information mentioned by a player as that player's claim, not as system "
+            "truth, but use it when explaining their stated line. If public events "
+            "and stated private information prove a forced kill or forced loss, "
+            "admit it plainly instead of contradicting the line. "
             'Example response: {"reply":"Hard to say yet, but pressure is rising."}'
         )
         if profile_prompt:

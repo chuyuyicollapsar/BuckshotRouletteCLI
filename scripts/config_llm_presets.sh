@@ -57,7 +57,7 @@ ai_player_preset='{
   "persona_prompt": "You are a careful Buckshot Roulette AI player.",
   "strategy_prompt": "Prefer legal, conservative actions. Use items when they reduce risk.",
   "chat_enabled": true,
-  "chat_prompt": "Keep table talk short and in character. When public events prove a player's read, admit it instead of bluffing.",
+  "chat_prompt": "Keep table talk short and in character. Check hp, visible items, public events, and player-claimed private info before judging lethal lines.",
   "chat_trigger_mode": "mention",
   "chat_model_preset_id": null,
   "chat_max_chars": 160,

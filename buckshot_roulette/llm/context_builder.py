@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from buckshot_roulette.backend.models import GameEvent, GameSession, Room, RoomPlayer
 from buckshot_roulette.backend.schemas import PlayerVisibleStateResponse
-from buckshot_roulette.backend.serializers import serialize_event
+from buckshot_roulette.backend.serializers import serialize_domain_player, serialize_event
 
 
 class LLMContextBuilder:
@@ -98,16 +98,7 @@ class LLMContextBuilder:
                 ),
                 "public_shell_counts": self._public_shell_counts(match),
                 "players": (
-                    [
-                        {
-                            "player_id": player.id,
-                            "name": player.name,
-                            "hp": player.hp,
-                            "max_hp": player.max_hp,
-                            "alive": player.alive,
-                        }
-                        for player in match.players
-                    ]
+                    [serialize_domain_player(player) for player in match.players]
                     if match is not None
                     else [
                         {
