@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import sys
 import threading
@@ -12,7 +13,7 @@ from .renderer import (
     alive_opponents,
     item_label,
     print_game_header,
-    print_events,
+    print_events as render_events,
     print_room,
     print_visible_state,
 )
@@ -22,6 +23,37 @@ from .websocket_client import WebSocketClient, WebSocketError
 GAME_COMMAND_HINT = "提示：Enter/r 刷新 | c 聊天 | q 退出"
 ACTION_COMMAND_HINT = "提示：输入行动编号执行 | Enter/r 刷新 | c 聊天 | q 退出"
 COMMAND_PROMPT = "命令 > "
+
+
+class TerminalCommandPrompt:
+    def __init__(self, help_text: str) -> None:
+        self.help_text = help_text
+        self._buffer: list[str] = []
+
+    def append(self, char: str) -> None:
+        self._buffer.append(char)
+
+    def backspace(self) -> None:
+        if self._buffer:
+            self._buffer.pop()
+
+    def value(self) -> str:
+        return "".join(self._buffer)
+
+    def render(self) -> None:
+        text = self.value()
+        sys.stdout.write(f"\r\x1b[2K{COMMAND_PROMPT}{text}")
+        sys.stdout.write(f"\n\r\x1b[2K{self.help_text}")
+        sys.stdout.write(f"\x1b[1A\r{COMMAND_PROMPT}{text}")
+        sys.stdout.flush()
+
+    def clear(self) -> None:
+        sys.stdout.write("\r\x1b[2K\n\r\x1b[2K\x1b[1A\r")
+        sys.stdout.flush()
+
+
+_TERMINAL_LOCK = threading.RLock()
+_ACTIVE_COMMAND_PROMPT: TerminalCommandPrompt | None = None
 
 
 class RoomSession:
@@ -135,7 +167,7 @@ class RoomSession:
                 self._apply_envelope(envelope, print_updates=True)
         except (OSError, WebSocketError, json.JSONDecodeError) as exc:
             if not self._stop.is_set():
-                print(f"\n[连接] WebSocket 已断开：{exc}")
+                print_terminal_message(f"\n[连接] WebSocket 已断开：{exc}")
         finally:
             with self._lock:
                 self._ws_connected = False
@@ -581,22 +613,112 @@ def safe_refresh(session: RoomSession) -> None:
 
 
 def prompt_command(help_text: str) -> str:
-    if sys.stdin.isatty() and sys.stdout.isatty():
-        print()
-        sys.stdout.write(COMMAND_PROMPT)
-        sys.stdout.write("\n")
-        sys.stdout.write(help_text)
-        sys.stdout.write("\n")
-        sys.stdout.write(f"\x1b[2A\r{COMMAND_PROMPT}")
-        sys.stdout.flush()
-        try:
-            return input().strip().lower()
-        finally:
-            sys.stdout.write("\x1b[1B\r")
-            sys.stdout.flush()
+    if is_interactive_terminal():
+        prompt = TerminalCommandPrompt(help_text)
+        global _ACTIVE_COMMAND_PROMPT
+        with _raw_terminal_input():
+            with _TERMINAL_LOCK:
+                _ACTIVE_COMMAND_PROMPT = prompt
+                prompt.render()
+            try:
+                while True:
+                    key = _read_terminal_key()
+                    if key in {"\r", "\n"}:
+                        return prompt.value().strip().lower()
+                    if key == "\x03":
+                        raise KeyboardInterrupt
+                    if key == "\x04":
+                        raise EOFError
+
+                    changed = False
+                    with _TERMINAL_LOCK:
+                        if key in {"\b", "\x7f"}:
+                            prompt.backspace()
+                            changed = True
+                        elif key.isprintable():
+                            prompt.append(key)
+                            changed = True
+                        if changed:
+                            prompt.render()
+            finally:
+                with _TERMINAL_LOCK:
+                    prompt.clear()
+                    if _ACTIVE_COMMAND_PROMPT is prompt:
+                        _ACTIVE_COMMAND_PROMPT = None
 
     print(f"\n{help_text}")
     return input(COMMAND_PROMPT).strip().lower()
+
+
+def print_events(events: list[dict[str, Any]]) -> None:
+    write_above_command_prompt(lambda: render_events(events))
+
+
+def print_terminal_message(message: str) -> None:
+    write_above_command_prompt(lambda: print(message))
+
+
+def write_above_command_prompt(write: Any) -> None:
+    if not is_interactive_terminal():
+        write()
+        return
+
+    with _TERMINAL_LOCK:
+        prompt = _ACTIVE_COMMAND_PROMPT
+        if prompt is not None:
+            prompt.clear()
+        try:
+            write()
+        finally:
+            if prompt is not None:
+                prompt.render()
+            sys.stdout.flush()
+
+
+def is_interactive_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+@contextmanager
+def _raw_terminal_input() -> Any:
+    if sys.platform == "win32":
+        yield
+        return
+
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+
+
+def _read_terminal_key() -> str:
+    if sys.platform == "win32":
+        import msvcrt
+
+        key = msvcrt.getwch()
+        if key in {"\x00", "\xe0"}:
+            msvcrt.getwch()
+            return ""
+        return key
+
+    key = sys.stdin.read(1)
+    if key == "\x1b":
+        _drain_escape_sequence()
+        return ""
+    return key
+
+
+def _drain_escape_sequence() -> None:
+    import select
+
+    while select.select([sys.stdin], [], [], 0.001)[0]:
+        sys.stdin.read(1)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -4,11 +4,14 @@ from unittest.mock import patch
 import tomllib
 import unittest
 
+import buckshot_roulette.cli.main as client_main
 from buckshot_roulette.cli.main import (
     COMMAND_PROMPT,
     GAME_COMMAND_HINT,
+    TerminalCommandPrompt,
     parse_args as parse_client_args,
     prompt_command,
+    write_above_command_prompt,
 )
 from buckshot_roulette.server import parse_args as parse_server_args
 
@@ -58,6 +61,41 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(choice, "c")
         self.assertNotIn("\x1b", stdout.getvalue())
         fake_input.assert_called_once_with(COMMAND_PROMPT)
+
+    def test_prompt_command_clears_interactive_input_area(self):
+        stdout = io.StringIO()
+        keys = iter(["c", "\r"])
+
+        with (
+            patch("sys.stdout", stdout),
+            patch.object(client_main, "is_interactive_terminal", return_value=True),
+            patch.object(client_main, "_raw_terminal_input"),
+            patch.object(client_main, "_read_terminal_key", side_effect=lambda: next(keys)),
+        ):
+            choice = prompt_command(GAME_COMMAND_HINT)
+
+        self.assertEqual(choice, "c")
+        self.assertIn("\x1b[2K", stdout.getvalue())
+        self.assertIsNone(client_main._ACTIVE_COMMAND_PROMPT)
+
+    def test_write_above_command_prompt_restores_active_prompt(self):
+        stdout = io.StringIO()
+        prompt = TerminalCommandPrompt(GAME_COMMAND_HINT)
+        prompt.append("c")
+
+        with (
+            patch("sys.stdout", stdout),
+            patch.object(client_main, "is_interactive_terminal", return_value=True),
+        ):
+            client_main._ACTIVE_COMMAND_PROMPT = prompt
+            try:
+                write_above_command_prompt(lambda: print("[事件] 测试"))
+            finally:
+                client_main._ACTIVE_COMMAND_PROMPT = None
+
+        output = stdout.getvalue()
+        self.assertIn("[事件] 测试", output)
+        self.assertIn(f"{COMMAND_PROMPT}c", output)
 
 
 if __name__ == "__main__":
