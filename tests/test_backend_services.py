@@ -155,6 +155,46 @@ class BackendServiceTests(unittest.TestCase):
         public_events = [event for event in events if event.visible_to == "ALL"]
         self.assertIn("使用了放大镜", public_events[0].message)
 
+    def test_inverter_event_does_not_reveal_shell_until_shot(self):
+        config = MatchConfig(
+            fixed_initial_hp=3,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner = self.make_services(config)
+        room, bob = room_service.join_room(room.room_code, "Bob")
+        room_service.set_ready(room.room_code, bob.token, True)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+        match = session.state.current_match_state
+        match.players[0].items.append(ItemType.INVERTER)
+
+        _, events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {
+                "type": "use_item",
+                "item": "INVERTER",
+                "item_index": 0,
+            },
+        )
+
+        public_event = events[0]
+        self.assertEqual(public_event.visible_to, "ALL")
+        self.assertEqual(public_event.message, "Alice 使用逆转器，反转了当前子弹。")
+        self.assertNotIn("实弹", public_event.message)
+        self.assertNotIn("空包弹", public_event.message)
+        self.assertNotIn("shell_after", public_event.payload.get("details", {}))
+
+        _, shot_events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {"type": "shoot_self"},
+        )
+
+        self.assertIn("是空包弹", shot_events[0].message)
+
     def test_owner_leave_transfers_owner_in_lobby(self):
         _, _, room_service, _, room, owner = self.make_services()
         room, bob = room_service.join_room(room.room_code, "Bob")

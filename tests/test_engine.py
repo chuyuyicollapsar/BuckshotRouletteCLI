@@ -62,6 +62,18 @@ class GameEngineTests(unittest.TestCase):
         self.assertTrue(result.round_ended)
         self.assertEqual(match.current_player_idx, 1)
 
+    def test_inverter_message_does_not_reveal_shell_type(self):
+        engine, _, match = self.make_match([ShellType.LIVE, ShellType.BLANK])
+        match.players[0].items.append(ItemType.INVERTER)
+
+        result = engine.use_item(match, ItemType.INVERTER)
+
+        self.assertEqual(result.message, "A 使用逆转器，反转了当前子弹。")
+        self.assertNotIn("实弹", result.message)
+        self.assertNotIn("空包弹", result.message)
+        self.assertNotIn("shell_after", result.details)
+        self.assertEqual(match.chambers[match.chamber_index], ShellType.BLANK)
+
     def test_match_finish_updates_game_score(self):
         engine, game, match = self.make_match([ShellType.LIVE, ShellType.BLANK], hp=1)
 

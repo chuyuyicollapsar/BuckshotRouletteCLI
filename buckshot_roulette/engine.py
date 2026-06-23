@@ -427,11 +427,8 @@ class GameEngine:
                 ShellType.BLANK if shell == ShellType.LIVE else ShellType.LIVE
             )
             match.chambers[match.chamber_index] = inverted
-            message = (
-                f"{actor.name} 使用{item_label(item_type)}，当前子弹变为"
-                f"{shell_label(inverted)}。"
-            )
-            details["shell_after"] = inverted.value
+            message = f"{actor.name} 使用{item_label(item_type)}，反转了当前子弹。"
+            details["inverted"] = True
 
         elif item_type == ItemType.BURNER_PHONE:
             remaining = self.remaining_shells(match)
