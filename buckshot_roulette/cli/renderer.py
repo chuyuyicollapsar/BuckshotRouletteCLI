@@ -107,6 +107,7 @@ def print_command_help(actions: list[dict[str, Any]], state: dict[str, Any]) -> 
     print("\n命令说明：")
     print("直接输入文字：发送聊天")
     print(f"玩家编号：{format_player_command_refs(state)}")
+    print_item_command_help()
 
     if not actions:
         print("当前没有可提交行动。")
@@ -122,21 +123,15 @@ def print_command_help(actions: list[dict[str, Any]], state: dict[str, Any]) -> 
         for line in shot_lines:
             print(f"  {line}")
 
-    item_actions = [
-        action for action in actions if action.get("type") == "use_item"
-    ]
-    item_counts: dict[str, int] = {}
-    for action in item_actions:
-        item = str(action.get("item", ""))
-        item_counts[item] = item_counts.get(item, 0) + 1
-    item_lines = [
-        command_use_label(action, state, item_counts)
-        for action in item_actions
-    ]
-    if item_lines:
-        print("道具：")
-        for line in item_lines:
-            print(f"  {line}")
+def print_item_command_help() -> None:
+    print("道具：")
+    print(f"  名称：{format_item_command_refs()}")
+    print("  无对象：/use 道具，例如：/use beer")
+    print("  有对象（干扰器）：/use jammer --玩家，例如：/use jammer --1")
+    print(
+        "  有对象且更多参数（兴奋剂）：/use adrenaline --玩家 --道具 [--玩家]，"
+        "例如：/use adrenaline --1 --beer；偷取干扰器时：/use adrenaline --1 --jammer --2"
+    )
 
 
 def command_shot_label(action: dict[str, Any], state: dict[str, Any]) -> str:
@@ -150,36 +145,20 @@ def command_shot_label(action: dict[str, Any], state: dict[str, Any]) -> str:
     return f"/shot {ref}  射击 [{target}] {name}"
 
 
-def command_use_label(
-    action: dict[str, Any], state: dict[str, Any], item_counts: dict[str, int]
-) -> str:
-    item = str(action.get("item", ""))
-    label = item_label(item)
-    item_ref = item.lower()
-    if item_counts.get(item, 0) > 1 and action.get("item_index") is not None:
-        item_ref = str(int(action["item_index"]) + 1)
-    if item == "JAMMER":
-        target = first_opponent(state)
-        target_ref = player_command_ref(state, target.get("player_id")) if target else "player"
-        return f"/use {item_ref} --{target_ref}  使用{label}"
-    if item == "ADRENALINE":
-        target = first_stealable_opponent(state)
-        target_ref = player_command_ref(state, target.get("player_id")) if target else "player"
-        steal_ref = first_stealable_item_ref(target) if target else "item"
-        secondary = " --player" if steal_ref == "jammer" else ""
-        return (
-            f"/use {item_ref} --{target_ref} --{steal_ref}{secondary}  "
-            f"偷取并使用目标道具"
-        )
-    return f"/use {item_ref}  使用{label}"
-
-
 def format_player_command_refs(state: dict[str, Any]) -> str:
     refs = []
     for player in players_in_command_order(state):
         suffix = "（你）" if player.get("player_id") == state.get("player_seat_index") else ""
         refs.append(f"{player.get('player_id')}={player.get('name')}{suffix}")
     return " | ".join(refs) if refs else "-"
+
+
+def format_item_command_refs() -> str:
+    refs = [
+        f"{item.lower()}（{label}）"
+        for item, label in ITEM_LABELS.items()
+    ]
+    return " | ".join(refs)
 
 
 def player_command_ref(state: dict[str, Any], player_id: int | None) -> str | None:
@@ -196,35 +175,6 @@ def players_in_command_order(state: dict[str, Any]) -> list[dict[str, Any]]:
         if player.get("player_id") is not None
     ]
     return sorted(players, key=lambda player: int(player["player_id"]))
-
-
-def first_opponent(state: dict[str, Any]) -> dict[str, Any] | None:
-    for player in players_in_command_order(state):
-        if player.get("player_id") == state.get("player_seat_index"):
-            continue
-        if player.get("alive", True):
-            return player
-    return None
-
-
-def first_stealable_opponent(state: dict[str, Any]) -> dict[str, Any] | None:
-    for player in players_in_command_order(state):
-        if player.get("player_id") == state.get("player_seat_index"):
-            continue
-        if player.get("alive", True) and any(
-            item != "ADRENALINE" for item in player.get("items", [])
-        ):
-            return player
-    return None
-
-
-def first_stealable_item_ref(player: dict[str, Any] | None) -> str:
-    if player is None:
-        return "item"
-    for item in player.get("items", []):
-        if item != "ADRENALINE":
-            return str(item).lower()
-    return "item"
 
 
 def player_name(state: dict[str, Any], player_id: int | None) -> str | None:

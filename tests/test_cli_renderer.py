@@ -103,7 +103,27 @@ class CliRendererTests(unittest.TestCase):
         self.assertIn("/shot 0", output)
         self.assertIn("/shot 1", output)
         self.assertIn("/use beer", output)
-        self.assertIn("/use adrenaline --1 --jammer --player", output)
+        self.assertIn("无对象：/use 道具，例如：/use beer", output)
+        self.assertIn("有对象（干扰器）：/use jammer --玩家，例如：/use jammer --1", output)
+        self.assertIn(
+            "有对象且更多参数（兴奋剂）：/use adrenaline --玩家 --道具 [--玩家]",
+            output,
+        )
+        self.assertIn("例如：/use adrenaline --1 --beer", output)
+        self.assertIn("偷取干扰器时：/use adrenaline --1 --jammer --2", output)
+        for item in [
+            "jammer",
+            "hand_saw",
+            "magnifying_glass",
+            "beer",
+            "cigarette_pack",
+            "inverter",
+            "burner_phone",
+            "adrenaline",
+            "remote",
+        ]:
+            self.assertIn(item, output)
+        self.assertNotIn("--player", output)
         self.assertNotIn("--item", output)
         self.assertNotIn("--with", output)
         self.assertNotIn("可选行动：", output)
