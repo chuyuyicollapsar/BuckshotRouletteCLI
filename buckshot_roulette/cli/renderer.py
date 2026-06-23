@@ -66,11 +66,50 @@ def print_visible_state(state: dict[str, Any]) -> None:
             )
 
 
+def print_player_info(state: dict[str, Any]) -> None:
+    current_id = state.get("current_player_id")
+    current_name = player_name(state, current_id)
+    if current_name:
+        print(f"\n当前回合：[{current_id}] {current_name}")
+    else:
+        print("\n当前回合：-")
+
+    print("玩家：")
+    for player in state.get("visible_players", []):
+        if "hp" not in player:
+            continue
+        marker = "->" if player.get("player_id") == current_id else "  "
+        items = ", ".join(item_label(item) for item in player.get("items", [])) or "无"
+        if player.get("hand_saw_active"):
+            items = f"{items}, 手锯生效" if items != "无" else "手锯生效"
+        print(
+            f"{marker} [{player.get('player_id')}] {player.get('name')}: "
+            f"HP {player.get('hp')}/{player.get('max_hp')} | 道具：{items}"
+        )
+
+
 def print_events(events: list[dict[str, Any]]) -> None:
     for event in events:
         message = event.get("message")
         if message:
-            print(f"\n[事件] {message}")
+            print(f"\n[{event_prefix(event)}] {message}")
+
+
+def event_prefix(event: dict[str, Any]) -> str:
+    if event.get("event_type") == "chat_message":
+        return "聊天"
+    if event.get("actor_player_id") is None:
+        return "系统"
+    return "事件"
+
+
+def print_action_list(actions: list[dict[str, Any]], state: dict[str, Any]) -> None:
+    if not actions:
+        print("\n当前没有可提交行动。")
+        return
+    print("\n可选行动：")
+    for index, action in enumerate(actions, start=1):
+        print(f"{index}. {action_label(action, state)}")
 
 
 def action_label(action: dict[str, Any], state: dict[str, Any]) -> str:

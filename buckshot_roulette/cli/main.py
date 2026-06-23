@@ -12,16 +12,17 @@ from .renderer import (
     action_label,
     alive_opponents,
     item_label,
-    print_game_header,
+    print_action_list,
     print_events as render_events,
+    print_player_info,
     print_room,
     print_visible_state,
 )
 from .websocket_client import WebSocketClient, WebSocketError
 
 
-GAME_COMMAND_HINT = "提示：Enter/r 刷新 | c 聊天 | q 退出"
-ACTION_COMMAND_HINT = "提示：输入行动编号执行 | Enter/r 刷新 | c 聊天 | q 退出"
+GAME_COMMAND_HINT = "Enter/r 获取事件 | i 玩家信息 | c 聊天 | q 退出"
+ACTION_COMMAND_HINT = "输入编号执行 | a 行动列表 | Enter/r 获取事件 | i 玩家信息 | c 聊天 | q 退出"
 COMMAND_PROMPT = "命令 > "
 
 
@@ -343,9 +344,6 @@ class CliApp:
                 if self._lobby_menu(session, room):
                     return
             elif status == "IN_GAME":
-                print_game_header(room)
-                if state is not None:
-                    print_visible_state(state)
                 if self._game_menu(session, state):
                     return
             else:
@@ -413,6 +411,8 @@ class CliApp:
             try:
                 if choice in {"", "r"}:
                     session.refresh(print_updates=True)
+                elif choice == "i":
+                    self._print_player_info(session)
                 elif choice == "c":
                     self._chat(session)
                 elif choice == "q":
@@ -438,6 +438,8 @@ class CliApp:
         try:
             if choice in {"", "r"}:
                 session.refresh(print_updates=True)
+            elif choice == "i":
+                self._print_player_info(session)
             elif choice == "c":
                 self._chat(session)
             elif choice == "q":
@@ -456,13 +458,16 @@ class CliApp:
             print("当前没有可提交行动。")
             return False
 
-        print("\n可选行动：")
-        for index, action in enumerate(actions, start=1):
-            print(f"{index}. {action_label(action, state)}")
         choice = prompt_command(ACTION_COMMAND_HINT)
         try:
+            if choice == "a":
+                print_action_list(actions, state)
+                return False
             if choice == "c":
                 self._chat(session)
+                return False
+            if choice == "i":
+                self._print_player_info(session)
                 return False
             if choice in {"r", ""}:
                 session.refresh(print_updates=True)
@@ -552,6 +557,14 @@ class CliApp:
         message = input("聊天内容：").strip()
         if message:
             session.send_chat(message)
+
+    def _print_player_info(self, session: RoomSession) -> None:
+        session.refresh()
+        state = session.state_snapshot()
+        if state is None:
+            print("\n尚未收到玩家信息。")
+            return
+        print_player_info(state)
 
 
 def find_room_player(room: dict[str, Any], player_id: str) -> dict[str, Any] | None:
