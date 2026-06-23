@@ -58,7 +58,7 @@ class EntrypointTests(unittest.TestCase):
         ):
             choice = prompt_command(GAME_COMMAND_HINT)
 
-        self.assertEqual(choice, "c")
+        self.assertEqual(choice, "C")
         self.assertNotIn("\x1b", stdout.getvalue())
         fake_input.assert_called_once_with(COMMAND_PROMPT)
 
@@ -78,9 +78,9 @@ class EntrypointTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("\x1b[2K", output)
         self.assertTrue(output.startswith("\n\r\x1b[2K> "))
-        self.assertIn("\n\r\x1b[2K\n\r\x1b[2Ka 行动列表", output)
+        self.assertIn("\n\r\x1b[2K\n\r\x1b[2Ka 命令说明", output)
         self.assertIn("> c", output)
-        self.assertNotIn("命令", output)
+        self.assertNotIn("命令 >", output)
         self.assertIsNone(client_main._ACTIVE_COMMAND_PROMPT)
 
     def test_write_above_command_prompt_restores_active_prompt(self):

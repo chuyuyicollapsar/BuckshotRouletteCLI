@@ -3,16 +3,15 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
+import shlex
 import sys
 import threading
 from typing import Any
 
 from .client import ApiClient, ApiError, normalize_server_url
 from .renderer import (
-    action_label,
-    alive_opponents,
     item_label,
-    print_action_list,
+    print_command_help,
     print_events as render_events,
     print_player_info,
     print_room,
@@ -21,8 +20,7 @@ from .renderer import (
 from .websocket_client import WebSocketClient, WebSocketError
 
 
-GAME_COMMAND_HINT = "a 行动列表 | i 玩家信息 | c 聊天 | r 同步 | q 退出"
-ACTION_COMMAND_HINT = "a 行动列表 | i 玩家信息 | c 聊天 | r 同步 | q 退出"
+GAME_COMMAND_HINT = "a 命令说明 | i 玩家信息 | r 同步 | q 退出"
 COMMAND_PROMPT = "> "
 
 
@@ -418,19 +416,23 @@ class CliApp:
             print("\n等待状态同步。")
             choice = prompt_command(GAME_COMMAND_HINT)
             try:
-                if choice == "r":
+                command = choice.strip()
+                normalized = command.lower()
+                if normalized == "r":
                     session.refresh(print_updates=True)
-                elif choice == "":
+                elif normalized == "":
                     pass
-                elif choice == "i":
+                elif normalized == "i":
                     self._print_player_info(session)
-                elif choice == "c":
-                    self._chat(session)
-                elif choice == "q":
+                elif normalized == "a":
+                    print("\n尚未收到状态，无法生成命令说明。")
+                elif normalized == "q":
                     session.close()
                     return True
+                elif command.startswith("/"):
+                    print("尚未收到状态，无法执行命令。")
                 else:
-                    print("请输入有效命令。")
+                    session.send_chat(command)
             except ApiError as exc:
                 print(f"操作失败：{exc}")
                 safe_refresh(session)
@@ -447,19 +449,8 @@ class CliApp:
         print(f"\n等待 [{current_id}] 行动。")
         choice = prompt_command(GAME_COMMAND_HINT)
         try:
-            if choice == "r":
-                session.refresh(print_updates=True)
-            elif choice == "":
-                pass
-            elif choice == "i":
-                self._print_player_info(session)
-            elif choice == "c":
-                self._chat(session)
-            elif choice == "q":
-                session.close()
+            if self._handle_game_command(session, state, choice):
                 return True
-            else:
-                print("请输入有效命令。")
         except ApiError as exc:
             print(f"操作失败：{exc}")
             safe_refresh(session)
@@ -471,38 +462,44 @@ class CliApp:
             print("当前没有可提交行动。")
             return False
 
-        choice = prompt_command(ACTION_COMMAND_HINT)
+        choice = prompt_command(GAME_COMMAND_HINT)
         try:
-            if choice == "a":
-                print_action_list(actions, state)
-                return False
-            if choice == "c":
-                self._chat(session)
-                return False
-            if choice == "i":
-                self._print_player_info(session)
-                return False
-            if choice == "r":
-                session.refresh(print_updates=True)
-                return False
-            if choice == "":
-                return False
-            if choice == "q":
-                session.close()
+            if self._handle_game_command(session, state, choice):
                 return True
-            try:
-                selected = int(choice)
-            except ValueError:
-                print("请输入行动编号或命令。")
-                return False
-            if not 1 <= selected <= len(actions):
-                print("行动编号无效。")
-                return False
-            self._submit_action(session, state, selected - 1)
         except ApiError as exc:
             print(f"操作失败：{exc}")
             safe_refresh(session)
         return False
+
+    def _handle_game_command(
+        self, session: RoomSession, state: dict[str, Any], raw_command: str
+    ) -> bool:
+        command = raw_command.strip()
+        normalized = command.lower()
+        if normalized == "r":
+            session.refresh(print_updates=True)
+        elif normalized == "":
+            pass
+        elif normalized == "i":
+            self._print_player_info(session)
+        elif normalized == "a":
+            print_command_help(state.get("legal_actions", []), state)
+        elif normalized == "q":
+            session.close()
+            return True
+        elif command.startswith("/"):
+            self._submit_command_action(session, state, command)
+        else:
+            session.send_chat(command)
+        return False
+
+    def _submit_command_action(
+        self, session: RoomSession, state: dict[str, Any], command: str
+    ) -> None:
+        action = parse_action_command(command, state)
+        if not action:
+            return
+        session.submit_action(action)
 
     def _finished_menu(self, session: RoomSession) -> bool:
         print("\n房间已结束：")
@@ -520,53 +517,6 @@ class CliApp:
         else:
             print("请输入有效选项。")
         return False
-
-    def _submit_action(
-        self, session: RoomSession, state: dict[str, Any], action_index: int
-    ) -> None:
-        actions = state.get("legal_actions", [])
-        if not actions:
-            print("当前没有可提交行动。")
-            return
-        action = dict(actions[action_index])
-        action.pop("requires_target_player_id", None)
-        action.pop("requires_target_item_index", None)
-        self._fill_action_targets(action, state)
-        session.submit_action(action)
-
-    def _fill_action_targets(self, action: dict[str, Any], state: dict[str, Any]) -> None:
-        if action.get("type") != "use_item":
-            return
-        item = action.get("item")
-        if item == "JAMMER":
-            target = prompt_player("选择干扰目标", alive_opponents(state))
-            action["target_player_id"] = target["player_id"]
-        elif item == "ADRENALINE":
-            victim = prompt_player(
-                "选择偷取目标",
-                [
-                    player
-                    for player in alive_opponents(state)
-                    if any(item != "ADRENALINE" for item in player.get("items", []))
-                ],
-            )
-            action["target_player_id"] = victim["player_id"]
-            stealable = [
-                (index, item)
-                for index, item in enumerate(victim.get("items", []))
-                if item != "ADRENALINE"
-            ]
-            if not stealable:
-                return
-            print("可偷道具：")
-            for display_index, (_, steal_item) in enumerate(stealable, start=1):
-                print(f"{display_index}. {item_label(steal_item)}")
-            selected = prompt_int("选择道具：", 1, len(stealable))
-            item_index, stolen_item = stealable[selected - 1]
-            action["target_item_index"] = item_index
-            if stolen_item == "JAMMER":
-                secondary = prompt_player("选择偷来的干扰器目标", alive_opponents(state))
-                action["secondary_target_player_id"] = secondary["player_id"]
 
     def _chat(self, session: RoomSession) -> None:
         message = input("聊天内容：").strip()
@@ -589,17 +539,210 @@ def find_room_player(room: dict[str, Any], player_id: str) -> dict[str, Any] | N
     return None
 
 
-def prompt_player(prompt: str, players: list[dict[str, Any]]) -> dict[str, Any]:
-    if not players:
-        raise ApiError("没有可选目标。")
-    print(prompt + "：")
-    for index, player in enumerate(players, start=1):
-        hp = ""
-        if "hp" in player:
-            hp = f" HP {player['hp']}/{player['max_hp']}"
-        print(f"{index}. [{player['player_id']}] {player['name']}{hp}")
-    selected = prompt_int("选择玩家：", 1, len(players))
-    return players[selected - 1]
+def parse_action_command(command: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        parts = shlex.split(command)
+    except ValueError as exc:
+        raise ApiError(f"命令格式错误：{exc}") from exc
+    if not parts:
+        return None
+    verb = parts[0].lower()
+    if verb == "/shot":
+        return parse_shot_command(parts[1:], state)
+    if verb == "/use":
+        return parse_use_command(parts[1:], state)
+    raise ApiError("未知命令。可用 /shot 或 /use。")
+
+
+def parse_shot_command(args: list[str], state: dict[str, Any]) -> dict[str, Any]:
+    if len(args) != 1:
+        raise ApiError("用法：/shot 玩家")
+    player = resolve_player_ref(args[0], state)
+    player_id = int(player["player_id"])
+    if player_id == state.get("player_seat_index"):
+        action = find_legal_action(state, "shoot_self")
+        if action is None:
+            raise ApiError("当前不能射击自己。")
+        return sanitize_action(action)
+    action = find_legal_action(state, "shoot_player", target_player_id=player_id)
+    if action is None:
+        raise ApiError("当前不能射击该玩家。")
+    return sanitize_action(action)
+
+
+def parse_use_command(args: list[str], state: dict[str, Any]) -> dict[str, Any]:
+    if not args:
+        raise ApiError("用法：/use 道具 [--玩家] [--道具] [--玩家]")
+    item_token = args[0]
+    options = parse_use_options(args[1:])
+    item_action = resolve_item_action(item_token, state)
+    action = sanitize_action(item_action)
+    item = action.get("item")
+
+    if item == "JAMMER":
+        target = require_option(options, "target", "用法：/use jammer --player")
+        action["target_player_id"] = int(resolve_player_ref(target, state)["player_id"])
+    elif item == "ADRENALINE":
+        target = require_option(
+            options,
+            "target",
+            "用法：/use adrenaline --1 --beer；偷 jammer：/use adrenaline --1 --jammer --2",
+        )
+        victim = resolve_player_ref(target, state)
+        action["target_player_id"] = int(victim["player_id"])
+        item_ref = require_option(
+            options,
+            "stolen_item",
+            "用法：/use adrenaline --1 --beer；偷 jammer：/use adrenaline --1 --jammer --2",
+        )
+        target_item_index, stolen_item = resolve_target_item_ref(item_ref, victim)
+        action["target_item_index"] = target_item_index
+        if stolen_item == "JAMMER":
+            secondary = require_option(
+                options,
+                "secondary_target",
+                "偷取 jammer 时需要指定使用目标：/use adrenaline --1 --jammer --2",
+            )
+            action["secondary_target_player_id"] = int(
+                resolve_player_ref(secondary, state)["player_id"]
+            )
+        elif options.get("secondary_target") is not None:
+            raise ApiError("偷取该道具不需要第二个玩家参数。")
+    elif options:
+        raise ApiError(f"{item_label(str(item))} 不需要参数。")
+    return action
+
+
+def parse_use_options(args: list[str]) -> dict[str, str]:
+    options: dict[str, str] = {}
+    for token in args:
+        if token.startswith("--") and len(token) > 2:
+            parse_use_flag(token[2:], options)
+            continue
+        raise ApiError(f"无法解析参数：{token}")
+    return options
+
+
+def parse_use_flag(value: str, options: dict[str, str]) -> None:
+    if not value:
+        raise ApiError("参数不能为空。")
+    if value.isdigit():
+        if "target" not in options:
+            options["target"] = value
+            return
+        if "secondary_target" not in options:
+            options["secondary_target"] = value
+            return
+        raise ApiError("玩家参数过多。")
+    if "stolen_item" in options:
+        raise ApiError("只能指定一个要偷取的道具。")
+    options["stolen_item"] = value
+
+
+def require_option(options: dict[str, str], key: str, message: str) -> str:
+    value = options.get(key)
+    if value is None or value == "":
+        raise ApiError(message)
+    return value
+
+
+def resolve_player_ref(ref: str, state: dict[str, Any]) -> dict[str, Any]:
+    players = players_in_command_order(state)
+    if ref.isdigit():
+        player_id = int(ref)
+        for player in players:
+            if player.get("player_id") == player_id:
+                return player
+        raise ApiError("玩家编号无效。")
+    matches = [
+        player
+        for player in players
+        if str(player.get("name", "")).lower() == ref.lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ApiError(f"找不到玩家：{ref}")
+    raise ApiError(f"玩家名称不唯一：{ref}")
+
+
+def players_in_command_order(state: dict[str, Any]) -> list[dict[str, Any]]:
+    players = [
+        player
+        for player in state.get("visible_players", [])
+        if player.get("player_id") is not None
+    ]
+    return sorted(players, key=lambda player: int(player["player_id"]))
+
+
+def resolve_item_action(item_ref: str, state: dict[str, Any]) -> dict[str, Any]:
+    actions = [
+        action
+        for action in state.get("legal_actions", [])
+        if action.get("type") == "use_item"
+    ]
+    if item_ref.isdigit():
+        item_index = int(item_ref) - 1
+        for action in actions:
+            if action.get("item_index") == item_index:
+                return action
+        raise ApiError("道具编号无效。")
+    matches = [
+        action
+        for action in actions
+        if item_matches(item_ref, str(action.get("item", "")))
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ApiError(f"找不到可使用道具：{item_ref}")
+    raise ApiError(f"你有多个{item_label(str(matches[0].get('item')))}，请用编号指定。")
+
+
+def resolve_target_item_ref(
+    item_ref: str, player: dict[str, Any]
+) -> tuple[int, str]:
+    items = list(player.get("items", []))
+    if item_ref.isdigit():
+        index = int(item_ref) - 1
+        if not 0 <= index < len(items):
+            raise ApiError("目标道具编号无效。")
+        item = str(items[index])
+        if item == "ADRENALINE":
+            raise ApiError("兴奋剂不能偷取兴奋剂。")
+        return index, item
+    matches = [
+        (index, str(item))
+        for index, item in enumerate(items)
+        if str(item) != "ADRENALINE" and item_matches(item_ref, str(item))
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ApiError(f"目标没有可偷取道具：{item_ref}")
+    raise ApiError(f"目标有多个{item_label(matches[0][1])}，请用编号指定。")
+
+
+def item_matches(ref: str, item: str) -> bool:
+    return ref.lower() == item.lower() or ref == item_label(item)
+
+
+def find_legal_action(
+    state: dict[str, Any], action_type: str, **criteria: Any
+) -> dict[str, Any] | None:
+    for action in state.get("legal_actions", []):
+        if action.get("type") != action_type:
+            continue
+        if all(action.get(key) == value for key, value in criteria.items()):
+            return action
+    return None
+
+
+def sanitize_action(action: dict[str, Any]) -> dict[str, Any]:
+    clean = dict(action)
+    clean.pop("requires_target_player_id", None)
+    clean.pop("requires_target_item_index", None)
+    return clean
 
 
 def prompt_choice(prompt: str, choices: list[str], *, default: str) -> str:
@@ -652,7 +795,7 @@ def prompt_command(help_text: str) -> str:
                 while True:
                     key = _read_terminal_key()
                     if key in {"\r", "\n"}:
-                        return prompt.value().strip().lower()
+                        return prompt.value().strip()
                     if key == "\x03":
                         raise KeyboardInterrupt
                     if key == "\x04":
@@ -675,7 +818,7 @@ def prompt_command(help_text: str) -> str:
                         _ACTIVE_COMMAND_PROMPT = None
 
     print(f"\n{help_text}")
-    return input(COMMAND_PROMPT).strip().lower()
+    return input(COMMAND_PROMPT).strip()
 
 
 def print_events(events: list[dict[str, Any]]) -> None:

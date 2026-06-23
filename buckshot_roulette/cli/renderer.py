@@ -103,31 +103,128 @@ def event_prefix(event: dict[str, Any]) -> str:
     return "事件"
 
 
-def print_action_list(actions: list[dict[str, Any]], state: dict[str, Any]) -> None:
+def print_command_help(actions: list[dict[str, Any]], state: dict[str, Any]) -> None:
+    print("\n命令说明：")
+    print("直接输入文字：发送聊天")
+    print(f"玩家编号：{format_player_command_refs(state)}")
+
     if not actions:
-        print("\n当前没有可提交行动。")
+        print("当前没有可提交行动。")
         return
-    print("\n可选行动：")
-    for index, action in enumerate(actions, start=1):
-        print(f"{index}. {action_label(action, state)}")
+
+    shot_lines = [
+        command_shot_label(action, state)
+        for action in actions
+        if action.get("type") in {"shoot_self", "shoot_player"}
+    ]
+    if shot_lines:
+        print("射击：")
+        for line in shot_lines:
+            print(f"  {line}")
+
+    item_actions = [
+        action for action in actions if action.get("type") == "use_item"
+    ]
+    item_counts: dict[str, int] = {}
+    for action in item_actions:
+        item = str(action.get("item", ""))
+        item_counts[item] = item_counts.get(item, 0) + 1
+    item_lines = [
+        command_use_label(action, state, item_counts)
+        for action in item_actions
+    ]
+    if item_lines:
+        print("道具：")
+        for line in item_lines:
+            print(f"  {line}")
 
 
-def action_label(action: dict[str, Any], state: dict[str, Any]) -> str:
-    action_type = action.get("type")
-    if action_type == "shoot_self":
-        return "射自己"
-    if action_type == "shoot_player":
-        target = action.get("target_player_id")
-        return f"射击 [{target}] {player_name(state, target) or '未知玩家'}"
-    if action_type == "use_item":
-        item = action.get("item", "")
-        index = action.get("item_index")
-        index_text = "" if index is None else f"#{int(index) + 1} "
-        extra = ""
-        if action.get("requires_target_player_id"):
-            extra = "（需选择目标）"
-        return f"使用 {index_text}{item_label(item)}{extra}"
-    return str(action)
+def command_shot_label(action: dict[str, Any], state: dict[str, Any]) -> str:
+    if action.get("type") == "shoot_self":
+        player_id = state.get("player_seat_index")
+        ref = player_command_ref(state, player_id) or str(player_id)
+        return f"/shot {ref}  射击自己"
+    target = action.get("target_player_id")
+    ref = player_command_ref(state, target) or str(target)
+    name = player_name(state, target) or "未知玩家"
+    return f"/shot {ref}  射击 [{target}] {name}"
+
+
+def command_use_label(
+    action: dict[str, Any], state: dict[str, Any], item_counts: dict[str, int]
+) -> str:
+    item = str(action.get("item", ""))
+    label = item_label(item)
+    item_ref = item.lower()
+    if item_counts.get(item, 0) > 1 and action.get("item_index") is not None:
+        item_ref = str(int(action["item_index"]) + 1)
+    if item == "JAMMER":
+        target = first_opponent(state)
+        target_ref = player_command_ref(state, target.get("player_id")) if target else "player"
+        return f"/use {item_ref} --{target_ref}  使用{label}"
+    if item == "ADRENALINE":
+        target = first_stealable_opponent(state)
+        target_ref = player_command_ref(state, target.get("player_id")) if target else "player"
+        steal_ref = first_stealable_item_ref(target) if target else "item"
+        secondary = " --player" if steal_ref == "jammer" else ""
+        return (
+            f"/use {item_ref} --{target_ref} --{steal_ref}{secondary}  "
+            f"偷取并使用目标道具"
+        )
+    return f"/use {item_ref}  使用{label}"
+
+
+def format_player_command_refs(state: dict[str, Any]) -> str:
+    refs = []
+    for player in players_in_command_order(state):
+        suffix = "（你）" if player.get("player_id") == state.get("player_seat_index") else ""
+        refs.append(f"{player.get('player_id')}={player.get('name')}{suffix}")
+    return " | ".join(refs) if refs else "-"
+
+
+def player_command_ref(state: dict[str, Any], player_id: int | None) -> str | None:
+    for player in players_in_command_order(state):
+        if player.get("player_id") == player_id:
+            return str(player_id)
+    return None
+
+
+def players_in_command_order(state: dict[str, Any]) -> list[dict[str, Any]]:
+    players = [
+        player
+        for player in state.get("visible_players", [])
+        if player.get("player_id") is not None
+    ]
+    return sorted(players, key=lambda player: int(player["player_id"]))
+
+
+def first_opponent(state: dict[str, Any]) -> dict[str, Any] | None:
+    for player in players_in_command_order(state):
+        if player.get("player_id") == state.get("player_seat_index"):
+            continue
+        if player.get("alive", True):
+            return player
+    return None
+
+
+def first_stealable_opponent(state: dict[str, Any]) -> dict[str, Any] | None:
+    for player in players_in_command_order(state):
+        if player.get("player_id") == state.get("player_seat_index"):
+            continue
+        if player.get("alive", True) and any(
+            item != "ADRENALINE" for item in player.get("items", [])
+        ):
+            return player
+    return None
+
+
+def first_stealable_item_ref(player: dict[str, Any] | None) -> str:
+    if player is None:
+        return "item"
+    for item in player.get("items", []):
+        if item != "ADRENALINE":
+            return str(item).lower()
+    return "item"
 
 
 def player_name(state: dict[str, Any], player_id: int | None) -> str | None:
@@ -137,15 +234,6 @@ def player_name(state: dict[str, Any], player_id: int | None) -> str | None:
         if player.get("player_id") == player_id:
             return player.get("name")
     return None
-
-
-def alive_opponents(state: dict[str, Any]) -> list[dict[str, Any]]:
-    me = state.get("player_seat_index")
-    return [
-        player
-        for player in state.get("visible_players", [])
-        if player.get("alive") and player.get("player_id") != me
-    ]
 
 
 def item_label(item: str) -> str:

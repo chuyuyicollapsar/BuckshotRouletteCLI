@@ -2,7 +2,11 @@ import io
 from unittest.mock import patch
 import unittest
 
-from buckshot_roulette.cli.renderer import print_events, print_player_info
+from buckshot_roulette.cli.renderer import (
+    print_command_help,
+    print_events,
+    print_player_info,
+)
 
 
 class CliRendererTests(unittest.TestCase):
@@ -66,6 +70,43 @@ class CliRendererTests(unittest.TestCase):
         self.assertNotIn("revision", output)
         self.assertNotIn("弹匣", output)
         self.assertNotIn("剩余", output)
+
+    def test_command_help_lists_commands_instead_of_action_numbers(self):
+        stdout = io.StringIO()
+        state = {
+            "player_seat_index": 0,
+            "visible_players": [
+                {"player_id": 0, "name": "Alice", "alive": True, "items": ["BEER"]},
+                {"player_id": 1, "name": "AI", "alive": True, "items": ["JAMMER"]},
+            ],
+        }
+        actions = [
+            {"type": "shoot_self"},
+            {"type": "shoot_player", "target_player_id": 1},
+            {"type": "use_item", "item": "BEER", "item_index": 0},
+            {
+                "type": "use_item",
+                "item": "ADRENALINE",
+                "item_index": 1,
+                "requires_target_player_id": True,
+                "requires_target_item_index": True,
+            },
+        ]
+
+        with patch("sys.stdout", stdout):
+            print_command_help(actions, state)
+
+        output = stdout.getvalue()
+        self.assertIn("命令说明：", output)
+        self.assertIn("直接输入文字：发送聊天", output)
+        self.assertIn("玩家编号：0=Alice（你） | 1=AI", output)
+        self.assertIn("/shot 0", output)
+        self.assertIn("/shot 1", output)
+        self.assertIn("/use beer", output)
+        self.assertIn("/use adrenaline --1 --jammer --player", output)
+        self.assertNotIn("--item", output)
+        self.assertNotIn("--with", output)
+        self.assertNotIn("可选行动：", output)
 
 
 if __name__ == "__main__":
