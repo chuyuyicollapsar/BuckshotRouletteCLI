@@ -343,6 +343,8 @@ class TurnCoordinator:
 
         if result.round_ended and not match.match_over:
             events.extend(self._start_round(session, match))
+        elif not result.match_over and match.current_player_idx != result.actor_idx:
+            events.append(self._turn_started_event(session, match))
         if match.match_over:
             events.extend(self._finish_match_if_needed(room, session, match))
         if run_ai_turns:
@@ -550,6 +552,8 @@ class TurnCoordinator:
         events.extend(self._events_from_action_result(session, result))
         if result.round_ended and not match.match_over:
             events.extend(self._start_round(session, match))
+        elif not result.match_over and match.current_player_idx != result.actor_idx:
+            events.append(self._turn_started_event(session, match))
         if match.match_over:
             events.extend(self._finish_match_if_needed(room, session, match))
         return events
@@ -591,7 +595,19 @@ class TurnCoordinator:
                 },
             )
         )
+        events.append(self._turn_started_event(session, match))
         return events
+
+    def _turn_started_event(
+        self, session: GameSession, match: MatchState
+    ) -> GameEvent:
+        player = match.players[match.current_player_idx]
+        return self.session_service.append_event(
+            session,
+            event_type="turn_started",
+            message=f"轮到 {player.name} 行动。",
+            payload={"player_id": player.id},
+        )
 
     def _item_dealt_events(
         self,

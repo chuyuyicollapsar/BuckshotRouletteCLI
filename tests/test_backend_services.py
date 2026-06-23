@@ -76,14 +76,18 @@ class BackendServiceTests(unittest.TestCase):
             "game_started",
             "match_started",
             "round_started",
+            "turn_started",
         ])
         self.assertEqual(visible.current_player_id, 0)
         self.assertEqual(visible.public_shell_counts["remaining"], 2)
         self.assertNotIn("LIVE", visible.public_shell_counts)
         self.assertNotIn("BLANK", visible.public_shell_counts)
-        round_event = events[-1]
+        round_event = events[-2]
         self.assertEqual(round_event.payload["live_count"], 1)
         self.assertEqual(round_event.payload["blank_count"], 1)
+        turn_event = events[-1]
+        self.assertEqual(turn_event.message, "轮到 Alice 行动。")
+        self.assertEqual(turn_event.payload, {"player_id": 0})
         self.assertIn({"type": "shoot_self"}, visible.legal_actions)
 
     def test_round_start_deals_items_before_shell_reveal_in_turn_order(self):
@@ -107,6 +111,7 @@ class BackendServiceTests(unittest.TestCase):
             "item_dealt",
             "item_dealt",
             "round_started",
+            "turn_started",
         ])
         dealt_events = [event for event in events if event.event_type == "item_dealt"]
         self.assertEqual([event.actor_player_id for event in dealt_events], [
@@ -127,7 +132,55 @@ class BackendServiceTests(unittest.TestCase):
             {"player_id": 0, "item": "BEER", "item_index": 1},
             {"player_id": 1, "item": "BEER", "item_index": 1},
         ])
-        self.assertEqual(events[-1].event_type, "round_started")
+        self.assertEqual(events[-2].event_type, "round_started")
+        self.assertEqual(events[-1].event_type, "turn_started")
+
+    def test_turn_started_event_is_appended_when_turn_changes(self):
+        config = MatchConfig(
+            fixed_initial_hp=3,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner = self.make_services(config)
+        room, bob = room_service.join_room(room.room_code, "Bob")
+        room_service.set_ready(room.room_code, bob.token, True)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {"type": "shoot_player", "target_player_id": 1},
+            run_ai_turns=False,
+        )
+
+        self.assertEqual([event.event_type for event in events], [
+            "shoot_player",
+            "turn_started",
+        ])
+        self.assertEqual(events[-1].message, "轮到 Bob 行动。")
+        self.assertEqual(events[-1].payload, {"player_id": 1})
+
+    def test_blank_self_shot_does_not_repeat_turn_started_event(self):
+        config = MatchConfig(
+            fixed_initial_hp=3,
+            fixed_shell_sequence=(ShellType.BLANK, ShellType.LIVE),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner = self.make_services(config)
+        room, bob = room_service.join_room(room.room_code, "Bob")
+        room_service.set_ready(room.room_code, bob.token, True)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, events = coordinator.submit_action(
+            room.room_code,
+            owner.token,
+            session.revision,
+            {"type": "shoot_self"},
+            run_ai_turns=False,
+        )
+
+        self.assertEqual([event.event_type for event in events], ["shoot_self"])
 
     def test_only_current_player_can_submit_action(self):
         config = MatchConfig(
@@ -330,7 +383,10 @@ class BackendServiceTests(unittest.TestCase):
             run_ai_turns=False,
         )
 
-        self.assertEqual([event.event_type for event in human_events], ["shoot_player"])
+        self.assertEqual([event.event_type for event in human_events], [
+            "shoot_player",
+            "turn_started",
+        ])
         self.assertEqual(session.state.current_match_state.current_player_idx, 1)
 
         ai_events = coordinator.run_ai_turns(room, session)
