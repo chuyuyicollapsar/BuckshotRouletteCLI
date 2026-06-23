@@ -40,6 +40,11 @@ class FakeChatModel:
             "action": {"type": "shoot_self"},
         }
 
+    def invoke_chat(self, context: dict) -> dict:
+        trigger = context.get("trigger") or {}
+        from_name = trigger.get("from_name") or "player"
+        return {"reply": f"{from_name}, I am watching the table."}
+
 
 class LangChainChatModelAdapter:
     def __init__(self, model: Any) -> None:
@@ -77,6 +82,38 @@ class LangChainChatModelAdapter:
             ("human", json.dumps(context, ensure_ascii=False)),
         ]
         response = self.model.invoke(messages)
+        return self._response_to_text(response)
+
+    def invoke_chat(self, context: dict) -> str:
+        ai_profile = context.get("ai_profile") or {}
+        profile_prompt = "\n".join(
+            self._prompt_section(label, ai_profile.get(key))
+            for label, key in [
+                ("Game rules and visibility boundary", "rules_prompt"),
+                ("Persona", "persona_prompt"),
+                ("Chat style", "chat_prompt"),
+            ]
+            if str(ai_profile.get(key) or "").strip()
+        )
+        system_prompt = (
+            "You are an AI player chatting inside a Buckshot Roulette room. "
+            "Return exactly one JSON object with key reply. "
+            "Do not use markdown fences, prose outside JSON, XML tags, or comments. "
+            "Keep the reply short, in character, and under the configured limit. "
+            "Do not submit game actions, do not output action JSON, and do not "
+            "claim hidden shell order or private item results. "
+            'Example response: {"reply":"Hard to say yet, but pressure is rising."}'
+        )
+        if profile_prompt:
+            system_prompt = f"{system_prompt}\n\nAI chat profile:\n{profile_prompt}"
+        messages = [
+            ("system", system_prompt),
+            ("human", json.dumps(context, ensure_ascii=False)),
+        ]
+        response = self.model.invoke(messages)
+        return self._response_to_text(response)
+
+    def _response_to_text(self, response: Any) -> str:
         tool_calls = getattr(response, "tool_calls", None)
         if tool_calls:
             return json.dumps(tool_calls, ensure_ascii=False)

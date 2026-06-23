@@ -12,7 +12,12 @@ from buckshot_roulette.llm.output_parser import OutputParser, OutputParserError
 from buckshot_roulette.llm.prompt_library import PromptLibrary
 from buckshot_roulette.llm.repositories import LLMConfigStore
 from buckshot_roulette.llm.serializers import provider_to_public_dict
-from buckshot_roulette.llm.services import LLMAdminService, LLMConfigError, LLMDecisionService
+from buckshot_roulette.llm.services import (
+    LLMAdminService,
+    LLMChatService,
+    LLMConfigError,
+    LLMDecisionService,
+)
 
 
 class LLMServiceTests(unittest.TestCase):
@@ -90,6 +95,36 @@ class LLMServiceTests(unittest.TestCase):
 
         self.assertEqual(snapshot.rules_prompt, "custom rules")
         self.assertEqual(snapshot.decision_prompt, "custom decision hints")
+
+    def test_ai_snapshot_freezes_separate_chat_model(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+        admin.create_model_preset(
+            {
+                "id": "fake_chat",
+                "display_name": "Fake Chat",
+                "provider_id": "fake_local",
+                "model_name": "fake-chat-player",
+            }
+        )
+        admin.create_ai_player_preset(
+            {
+                "id": "chat_ai",
+                "display_name": "Chat AI",
+                "enabled": True,
+                "model_preset_id": "fake_default",
+                "chat_enabled": True,
+                "chat_model_preset_id": "fake_chat",
+            }
+        )
+
+        snapshot = admin.create_ai_snapshot("chat_ai")
+
+        self.assertIsNotNone(snapshot.chat_model_preset_snapshot)
+        self.assertEqual(
+            snapshot.chat_model_preset_snapshot.model_name,
+            "fake-chat-player",
+        )
 
     def test_unknown_prompt_id_is_rejected(self):
         store = LLMConfigStore()
@@ -218,6 +253,62 @@ class LLMServiceTests(unittest.TestCase):
         self.assertIn("Decision hints:\ndecision text", system_prompt)
         self.assertIn("Persona:\npersona text", system_prompt)
         self.assertIn("Strategy:\nstrategy text", system_prompt)
+
+    def test_chat_service_returns_trimmed_reply_when_enabled(self):
+        store = LLMConfigStore()
+        admin = LLMAdminService(store)
+        admin.create_ai_player_preset(
+            {
+                "id": "chat_ai",
+                "display_name": "Chat AI",
+                "enabled": True,
+                "model_preset_id": "fake_default",
+                "chat_enabled": True,
+                "chat_max_chars": 12,
+            }
+        )
+        snapshot = admin.create_ai_snapshot("chat_ai")
+
+        reply = LLMChatService(store).generate_reply(
+            snapshot,
+            {"trigger": {"from_name": "Alice"}},
+        )
+
+        self.assertEqual(reply, "Alice, I am")
+
+    def test_chat_service_returns_none_when_disabled(self):
+        store = LLMConfigStore()
+        snapshot = LLMAdminService(store).create_ai_snapshot("fake_cautious")
+
+        reply = LLMChatService(store).generate_reply(snapshot, {})
+
+        self.assertIsNone(reply)
+
+    def test_langchain_adapter_chat_uses_chat_prompt_not_action_prompt(self):
+        captured = {}
+
+        class DummyModel:
+            def invoke(self, messages):
+                captured["messages"] = messages
+                return '{"reply":"hello"}'
+
+        adapter = LangChainChatModelAdapter(DummyModel())
+
+        adapter.invoke_chat(
+            {
+                "ai_profile": {
+                    "rules_prompt": "rules text",
+                    "persona_prompt": "persona text",
+                    "chat_prompt": "chat text",
+                },
+                "trigger": {"message": "@AI hi"},
+            }
+        )
+
+        system_prompt = captured["messages"][0][1]
+        self.assertIn("Chat style:\nchat text", system_prompt)
+        self.assertIn("Return exactly one JSON object with key reply", system_prompt)
+        self.assertNotIn("thought_summary", system_prompt)
 
     def test_fake_decision_service_returns_legal_action(self):
         store = LLMConfigStore()

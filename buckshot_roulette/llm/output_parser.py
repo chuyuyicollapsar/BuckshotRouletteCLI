@@ -4,7 +4,7 @@ import ast
 import json
 from typing import Any
 
-from buckshot_roulette.llm.models import SingleActionDecision
+from buckshot_roulette.llm.models import ChatReply, SingleActionDecision
 
 
 class OutputParserError(ValueError):
@@ -48,6 +48,24 @@ class OutputParser:
         if not isinstance(thought, str):
             thought = str(thought)
         return SingleActionDecision(thought_summary=thought, action=action)
+
+    def parse_chat_reply(self, output: str | dict[str, Any]) -> ChatReply:
+        if isinstance(output, str):
+            try:
+                data = json.loads(output)
+            except json.JSONDecodeError as exc:
+                data = self._parse_embedded_json(output, exc)
+        else:
+            data = output
+        if not isinstance(data, dict):
+            raise OutputParserError("模型聊天输出必须是 JSON object。", output)
+        reply = data.get("reply")
+        if not isinstance(reply, str):
+            reply = "" if reply is None else str(reply)
+        reply = reply.strip()
+        if not reply:
+            raise OutputParserError("模型聊天输出缺少 reply 文本。", output)
+        return ChatReply(reply=reply)
 
     def _parse_embedded_json(
         self, output: str, original_error: json.JSONDecodeError

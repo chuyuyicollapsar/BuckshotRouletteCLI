@@ -44,6 +44,13 @@ class LLMFileRepositoryTests(unittest.TestCase):
                 payload["ai_player_presets"]["fake_cautious"]["decision_prompt_id"],
                 "builtin:ai_decision_hints_v1",
             )
+            self.assertFalse(
+                payload["ai_player_presets"]["fake_cautious"]["chat_enabled"]
+            )
+            self.assertEqual(
+                payload["ai_player_presets"]["fake_cautious"]["chat_trigger_mode"],
+                "mention",
+            )
 
     def test_upsert_provider_persists_private_config_and_reloads(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -188,6 +195,8 @@ class LLMFileRepositoryTests(unittest.TestCase):
                 preset.decision_prompt_id,
                 "builtin:ai_decision_hints_v1",
             )
+            self.assertFalse(preset.chat_enabled)
+            self.assertEqual(preset.chat_trigger_mode.value, "mention")
 
     def test_invalid_json_raises_clear_error(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

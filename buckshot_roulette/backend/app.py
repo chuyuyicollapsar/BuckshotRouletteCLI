@@ -50,6 +50,7 @@ from buckshot_roulette.llm.serializers import (
 )
 from buckshot_roulette.llm.services import (
     LLMAdminService,
+    LLMChatService,
     LLMConfigError,
     LLMDecisionService,
 )
@@ -66,7 +67,8 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
     llm_store = llm_store or FileBackedLLMConfigStore.from_default_path()
     llm_admin_service = LLMAdminService(llm_store)
     llm_decision_service = LLMDecisionService(llm_store)
-    ai_player_controller = AIPlayerController(llm_decision_service)
+    llm_chat_service = LLMChatService(llm_store)
+    ai_player_controller = AIPlayerController(llm_decision_service, llm_chat_service)
     turn_coordinator.ai_player_controller = ai_player_controller
 
     app.state.store = store
@@ -78,6 +80,7 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
     app.state.llm_config_path = getattr(llm_store, "path", None)
     app.state.llm_admin_service = llm_admin_service
     app.state.llm_decision_service = llm_decision_service
+    app.state.llm_chat_service = llm_chat_service
 
     def _events_visible_to_player(events, seat_index):
         visible = []
@@ -124,6 +127,18 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
         if actions_taken >= max_actions:
             event = turn_coordinator.append_ai_safety_stop(session, max_actions)
             await publish_room_update(room, "action_result", [event])
+
+    async def run_ai_chat_replies_and_publish(room_code, trigger_event):
+        room = room_service.get_room(room_code)
+        session = turn_coordinator.store_session(room)
+        events = await asyncio.to_thread(
+            turn_coordinator.run_ai_chat_replies,
+            room,
+            session,
+            trigger_event,
+        )
+        if events:
+            await publish_room_update(room, "chat_message", events)
 
     @app.exception_handler(ServiceError)
     async def service_error_handler(_, exc: ServiceError) -> JSONResponse:
@@ -245,6 +260,7 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
         room = room_service.get_room(room_code)
         envelope = EventEnvelope(type="chat_message", event=serialize_event(event))
         await publish_room_update(room, "chat_message", [event])
+        asyncio.create_task(run_ai_chat_replies_and_publish(room.room_code, event))
         return envelope
 
     @app.get("/rooms/{room_code}/visible-state")
@@ -283,6 +299,9 @@ def create_app(llm_store: LLMConfigStore | None = None) -> FastAPI:
                             message,
                         )
                         await publish_room_update(room, "chat_message", [event])
+                        asyncio.create_task(
+                            run_ai_chat_replies_and_publish(room.room_code, event)
+                        )
         except WebSocketDisconnect:
             publisher.disconnect(room.room_code, websocket)
 

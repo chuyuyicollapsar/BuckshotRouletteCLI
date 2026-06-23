@@ -12,6 +12,7 @@ from buckshot_roulette.llm.model_factory import (
 from buckshot_roulette.llm.models import (
     AIPlayerPreset,
     AIPlayerPresetSnapshot,
+    ChatTriggerMode,
     FallbackPolicy,
     ModelPreset,
     ModelPresetSnapshot,
@@ -112,6 +113,16 @@ class LLMAdminService:
             ),
             persona_prompt=str(data.get("persona_prompt", "")),
             strategy_prompt=str(data.get("strategy_prompt", "")),
+            chat_enabled=bool(data.get("chat_enabled", False)),
+            chat_prompt=str(data.get("chat_prompt", "")),
+            chat_trigger_mode=ChatTriggerMode(
+                data.get("chat_trigger_mode", ChatTriggerMode.MENTION.value)
+            ),
+            chat_model_preset_id=self._optional_prompt_text(
+                data.get("chat_model_preset_id")
+            ),
+            chat_max_chars=int(data.get("chat_max_chars", 160)),
+            chat_cooldown_seconds=int(data.get("chat_cooldown_seconds", 5)),
             max_item_actions_per_turn=int(data.get("max_item_actions_per_turn", 8)),
             max_parse_failures_per_turn=int(
                 data.get("max_parse_failures_per_turn", 2)
@@ -125,6 +136,8 @@ class LLMAdminService:
         )
         self._validate_ai_player_preset(preset)
         self.store.get_model_preset(preset.model_preset_id)
+        if preset.chat_model_preset_id:
+            self.store.get_model_preset(preset.chat_model_preset_id)
         return self.store.upsert_ai_player_preset(preset)
 
     def create_ai_snapshot(self, preset_id: str) -> AIPlayerPresetSnapshot:
@@ -133,6 +146,16 @@ class LLMAdminService:
             raise LLMConfigError("AI 玩家预设未启用。")
         model_preset = self.store.get_model_preset(ai_preset.model_preset_id)
         provider = self.store.get_provider(model_preset.provider_id)
+        chat_model_preset = None
+        if ai_preset.chat_model_preset_id:
+            chat_model_preset = self.store.get_model_preset(
+                ai_preset.chat_model_preset_id
+            )
+        chat_provider = (
+            self.store.get_provider(chat_model_preset.provider_id)
+            if chat_model_preset is not None
+            else None
+        )
         rules_prompt = self._resolve_prompt(
             ai_preset.rules_prompt_id,
             custom_text=ai_preset.custom_rules_prompt,
@@ -141,28 +164,27 @@ class LLMAdminService:
             ai_preset.decision_prompt_id,
             custom_text=ai_preset.custom_decision_prompt,
         )
-        model_snapshot = ModelPresetSnapshot(
-            preset_id=model_preset.id,
-            preset_version=model_preset.version,
-            provider_id=model_preset.provider_id,
-            protocol=provider.protocol.value,
-            model_name=model_preset.model_name,
-            temperature=model_preset.temperature,
-            max_tokens=model_preset.max_tokens,
-            reasoning_effort=model_preset.reasoning_effort,
-            timeout_seconds=model_preset.timeout_seconds,
-            max_retries=model_preset.max_retries,
-            extra=dict(model_preset.extra),
+        model_snapshot = self._model_snapshot(model_preset, provider)
+        chat_model_snapshot = (
+            self._model_snapshot(chat_model_preset, chat_provider)
+            if chat_model_preset is not None and chat_provider is not None
+            else None
         )
         return AIPlayerPresetSnapshot(
             preset_id=ai_preset.id,
             preset_version=ai_preset.version,
             display_name=ai_preset.display_name,
             model_preset_snapshot=model_snapshot,
+            chat_model_preset_snapshot=chat_model_snapshot,
             rules_prompt=rules_prompt,
             decision_prompt=decision_prompt,
             persona_prompt=ai_preset.persona_prompt,
             strategy_prompt=ai_preset.strategy_prompt,
+            chat_enabled=ai_preset.chat_enabled,
+            chat_prompt=ai_preset.chat_prompt,
+            chat_trigger_mode=ai_preset.chat_trigger_mode.value,
+            chat_max_chars=ai_preset.chat_max_chars,
+            chat_cooldown_seconds=ai_preset.chat_cooldown_seconds,
             max_item_actions_per_turn=ai_preset.max_item_actions_per_turn,
             max_parse_failures_per_turn=ai_preset.max_parse_failures_per_turn,
             max_illegal_actions_per_turn=ai_preset.max_illegal_actions_per_turn,
@@ -300,6 +322,11 @@ class LLMAdminService:
         if preset.max_illegal_actions_per_turn < 0:
             raise LLMConfigError("max_illegal_actions_per_turn 不能为负。")
 
+        if preset.chat_max_chars <= 0:
+            raise LLMConfigError("chat_max_chars must be positive.")
+        if preset.chat_cooldown_seconds < 0:
+            raise LLMConfigError("chat_cooldown_seconds must not be negative.")
+
         self._resolve_prompt(
             preset.rules_prompt_id,
             custom_text=preset.custom_rules_prompt,
@@ -326,6 +353,23 @@ class LLMAdminService:
             return self.prompt_library.resolve(prompt_id, custom_text=custom_text)
         except PromptLibraryError as exc:
             raise LLMConfigError(str(exc)) from exc
+
+    def _model_snapshot(
+        self, preset: ModelPreset, provider: ProviderConfig
+    ) -> ModelPresetSnapshot:
+        return ModelPresetSnapshot(
+            preset_id=preset.id,
+            preset_version=preset.version,
+            provider_id=preset.provider_id,
+            protocol=provider.protocol.value,
+            model_name=preset.model_name,
+            temperature=preset.temperature,
+            max_tokens=preset.max_tokens,
+            reasoning_effort=preset.reasoning_effort,
+            timeout_seconds=preset.timeout_seconds,
+            max_retries=preset.max_retries,
+            extra=dict(preset.extra),
+        )
 
 
 class LLMDecisionService:
@@ -505,3 +549,49 @@ class LLMDecisionService:
                 ],
             },
         }
+
+
+class LLMChatService:
+    def __init__(
+        self,
+        store: LLMConfigStore,
+        model_factory: LangChainModelFactory | None = None,
+        output_parser: OutputParser | None = None,
+    ) -> None:
+        self.store = store
+        self.model_factory = model_factory or LangChainModelFactory()
+        self.output_parser = output_parser or OutputParser()
+
+    def generate_reply(
+        self,
+        snapshot: AIPlayerPresetSnapshot,
+        context: dict,
+    ) -> str | None:
+        if not snapshot.chat_enabled:
+            return None
+        model_snapshot = (
+            snapshot.chat_model_preset_snapshot or snapshot.model_preset_snapshot
+        )
+        provider = self.store.get_provider(model_snapshot.provider_id)
+        try:
+            model = self.model_factory.create_chat_model(provider, model_snapshot)
+            raw = model.invoke_chat(context)
+            reply = self.output_parser.parse_chat_reply(raw).reply
+        except Exception as exc:
+            logger.warning(
+                "LLM chat failed; dropping reply. preset_id=%s "
+                "model_preset_id=%s error=%s",
+                snapshot.preset_id,
+                model_snapshot.preset_id,
+                exc,
+            )
+            return None
+        return self._trim_reply(reply, snapshot.chat_max_chars)
+
+    def _trim_reply(self, reply: str, max_chars: int) -> str | None:
+        trimmed = reply.strip()
+        if not trimmed:
+            return None
+        if len(trimmed) > max_chars:
+            trimmed = trimmed[:max_chars].rstrip()
+        return trimmed or None

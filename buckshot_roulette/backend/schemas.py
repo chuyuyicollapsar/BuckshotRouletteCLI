@@ -175,6 +175,12 @@ class AIPlayerPresetRequest(BaseModel):
     custom_decision_prompt: str | None = None
     persona_prompt: str = ""
     strategy_prompt: str = ""
+    chat_enabled: bool = False
+    chat_prompt: str = ""
+    chat_trigger_mode: str = "mention"
+    chat_model_preset_id: str | None = None
+    chat_max_chars: int = 160
+    chat_cooldown_seconds: int = 5
     max_item_actions_per_turn: int = 8
     max_parse_failures_per_turn: int = 2
     max_illegal_actions_per_turn: int = 2

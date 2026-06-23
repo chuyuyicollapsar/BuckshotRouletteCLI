@@ -42,6 +42,7 @@ def model_preset_to_dict(preset: ModelPreset) -> dict[str, Any]:
 def ai_player_preset_to_dict(preset: AIPlayerPreset) -> dict[str, Any]:
     data = asdict(preset)
     data["fallback_policy"] = preset.fallback_policy.value
+    data["chat_trigger_mode"] = preset.chat_trigger_mode.value
     return data
 
 
@@ -53,5 +54,10 @@ def ai_snapshot_to_dict(snapshot: AIPlayerPresetSnapshot) -> dict[str, Any]:
     data = asdict(snapshot)
     data["model_preset_snapshot"] = model_snapshot_to_dict(
         snapshot.model_preset_snapshot
+    )
+    data["chat_model_preset_snapshot"] = (
+        model_snapshot_to_dict(snapshot.chat_model_preset_snapshot)
+        if snapshot.chat_model_preset_snapshot is not None
+        else None
     )
     return data

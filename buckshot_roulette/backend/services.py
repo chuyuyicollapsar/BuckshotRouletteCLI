@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
+import re
 import secrets
 import string
+import threading
 import uuid
 from typing import Any
 
@@ -281,6 +284,9 @@ class TurnCoordinator:
         self.session_service = session_service
         self.engine = engine
         self.ai_player_controller = ai_player_controller
+        self._ai_chat_in_flight: set[str] = set()
+        self._ai_chat_last_reply_at: dict[str, datetime] = {}
+        self._ai_chat_lock = threading.Lock()
 
     def start_game(self, room_code: str, owner_token: str) -> tuple[GameSession, list[GameEvent]]:
         room = self.room_service.get_room(room_code)
@@ -465,15 +471,108 @@ class TurnCoordinator:
             revision=revision,
             event_type="chat_message",
             message=f"{player.name}: {message}",
-            payload={"player_id": player.id, "name": player.name, "message": message},
+            payload={
+                "player_id": player.id,
+                "player_seat_index": player.seat_index,
+                "name": player.name,
+                "message": message,
+                "source": "human",
+            },
             visible_to="ALL",
         )
         if session is not None:
             session.event_log.append(event)
         return session, event
 
+    def run_ai_chat_replies(
+        self,
+        room: Room,
+        session: GameSession | None,
+        trigger_event: GameEvent,
+    ) -> list[GameEvent]:
+        if self.ai_player_controller is None or session is None:
+            return []
+        message = str((trigger_event.payload or {}).get("message", ""))
+        targets = self._mentioned_ai_players(room, message)
+        events: list[GameEvent] = []
+        for ai_player in targets:
+            if not self._reserve_ai_chat(ai_player):
+                continue
+            try:
+                reply = self.ai_player_controller.generate_chat_reply(
+                    room,
+                    ai_player,
+                    session,
+                    trigger_event,
+                )
+                if not reply:
+                    continue
+                event = self.session_service.append_event(
+                    session,
+                    event_type="chat_message",
+                    message=f"{ai_player.name}: {reply}",
+                    payload={
+                        "player_id": ai_player.id,
+                        "player_seat_index": ai_player.seat_index,
+                        "name": ai_player.name,
+                        "message": reply,
+                        "source": "ai",
+                        "trigger_event_id": trigger_event.event_id,
+                    },
+                    actor_player_id=ai_player.seat_index,
+                )
+                events.append(event)
+                self._mark_ai_chat_replied(ai_player.id, event.created_at)
+            finally:
+                self._release_ai_chat(ai_player.id)
+        return events
+
     def store_session(self, room: Room) -> GameSession | None:
         return self.session_service.store.get_session(room.game_session_id)
+
+    def _mentioned_ai_players(self, room: Room, message: str) -> list[RoomPlayer]:
+        if not message:
+            return []
+        wants_all = "@all" in message.lower()
+        targets: list[RoomPlayer] = []
+        for player in room.players:
+            if player.type != RoomPlayerType.AI:
+                continue
+            snapshot = player.ai_preset_snapshot
+            if snapshot is None or not snapshot.chat_enabled:
+                continue
+            if snapshot.chat_trigger_mode != "mention":
+                continue
+            if wants_all or self._mentions_name(message, player.name):
+                targets.append(player)
+        return targets
+
+    def _mentions_name(self, message: str, name: str) -> bool:
+        escaped = re.escape(name)
+        return re.search(rf"@{escaped}(?=\s|$|[，。！？,.!?])", message) is not None
+
+    def _reserve_ai_chat(self, ai_player: RoomPlayer) -> bool:
+        with self._ai_chat_lock:
+            if ai_player.id in self._ai_chat_in_flight:
+                return False
+            snapshot = ai_player.ai_preset_snapshot
+            if snapshot is None:
+                return False
+            last_reply_at = self._ai_chat_last_reply_at.get(ai_player.id)
+            if last_reply_at is not None:
+                elapsed = (utc_now() - last_reply_at).total_seconds()
+                if elapsed < snapshot.chat_cooldown_seconds:
+                    return False
+            self._ai_chat_in_flight.add(ai_player.id)
+            return True
+
+    def _mark_ai_chat_replied(self, ai_player_id: str, replied_at: datetime) -> None:
+        with self._ai_chat_lock:
+            self._ai_chat_last_reply_at[ai_player_id] = replied_at
+
+    def _release_ai_chat(self, ai_player_id: str) -> None:
+        with self._ai_chat_lock:
+            self._ai_chat_in_flight.discard(ai_player_id)
 
     def _execute_one_ai_action(
         self,

@@ -31,6 +31,10 @@ class FallbackPolicy(str, Enum):
     ATTACK_LOWEST_HP = "attack_lowest_hp"
 
 
+class ChatTriggerMode(str, Enum):
+    MENTION = "mention"
+
+
 @dataclass(slots=True)
 class ProviderConfig:
     id: str
@@ -87,6 +91,12 @@ class AIPlayerPreset:
     custom_decision_prompt: str | None = None
     persona_prompt: str = ""
     strategy_prompt: str = ""
+    chat_enabled: bool = False
+    chat_prompt: str = ""
+    chat_trigger_mode: ChatTriggerMode = ChatTriggerMode.MENTION
+    chat_model_preset_id: str | None = None
+    chat_max_chars: int = 160
+    chat_cooldown_seconds: int = 5
     max_item_actions_per_turn: int = 8
     max_parse_failures_per_turn: int = 2
     max_illegal_actions_per_turn: int = 2
@@ -99,10 +109,16 @@ class AIPlayerPresetSnapshot:
     preset_version: int
     display_name: str
     model_preset_snapshot: ModelPresetSnapshot
+    chat_model_preset_snapshot: ModelPresetSnapshot | None
     rules_prompt: str
     decision_prompt: str
     persona_prompt: str
     strategy_prompt: str
+    chat_enabled: bool
+    chat_prompt: str
+    chat_trigger_mode: str
+    chat_max_chars: int
+    chat_cooldown_seconds: int
     max_item_actions_per_turn: int
     max_parse_failures_per_turn: int
     max_illegal_actions_per_turn: int
@@ -114,6 +130,11 @@ class SingleActionDecision:
     thought_summary: str
     action: dict[str, Any]
     fallback_reason: str | None = None
+
+
+@dataclass(slots=True)
+class ChatReply:
+    reply: str
 
 
 @dataclass(slots=True)

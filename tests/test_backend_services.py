@@ -15,7 +15,7 @@ from buckshot_roulette.engine import GameEngine
 from buckshot_roulette.llm.ai_player_controller import AIPlayerController
 from buckshot_roulette.llm.context_builder import LLMContextBuilder
 from buckshot_roulette.llm.repositories import LLMConfigStore
-from buckshot_roulette.llm.services import LLMAdminService, LLMDecisionService
+from buckshot_roulette.llm.services import LLMAdminService, LLMChatService, LLMDecisionService
 from buckshot_roulette.models import ItemType, MatchConfig, ShellType
 
 
@@ -45,7 +45,10 @@ class BackendServiceTests(unittest.TestCase):
             room_service,
             session_service,
             engine,
-            AIPlayerController(LLMDecisionService(llm_store)),
+            AIPlayerController(
+                LLMDecisionService(llm_store),
+                LLMChatService(llm_store),
+            ),
         )
         room, owner = room_service.create_room(
             owner_name="Alice",
@@ -475,6 +478,162 @@ class BackendServiceTests(unittest.TestCase):
         self.assertIn("一场比赛包含 3 局游戏", context["ai_profile"]["rules_prompt"])
         self.assertIn("射击对方是最佳策略", context["ai_profile"]["decision_prompt"])
         self.assertIn("deterministic fake player", context["ai_profile"]["persona_prompt"])
+
+    def test_llm_action_context_excludes_chat_messages(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        snapshot = llm_admin.create_ai_snapshot("fake_cautious")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        room.players = [room.players[1], room.players[0]]
+        room.owner_player_id = room.players[1].id
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+        coordinator.append_chat(room.room_code, owner.token, "@Fake Cautious hi")
+        ai_player = room.players[0]
+        visible_state = coordinator.build_visible_state(room, ai_player)
+
+        context = LLMContextBuilder().build_context(
+            room,
+            ai_player,
+            session,
+            visible_state,
+        )
+
+        self.assertNotIn(
+            "chat_message",
+            [event["event_type"] for event in context["action_event_list"]],
+        )
+
+    def test_ai_chat_reply_requires_mention_and_does_not_advance_revision(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        llm_admin.create_ai_player_preset(
+            {
+                "id": "chat_ai",
+                "display_name": "ChatAI",
+                "enabled": True,
+                "model_preset_id": "fake_default",
+                "chat_enabled": True,
+                "chat_max_chars": 80,
+            }
+        )
+        snapshot = llm_admin.create_ai_snapshot("chat_ai")
+        room_service.add_ai_player(room.room_code, owner.token, snapshot)
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+        original_revision = session.revision
+
+        _, quiet_event = coordinator.append_chat(room.room_code, owner.token, "hello")
+        quiet_replies = coordinator.run_ai_chat_replies(room, session, quiet_event)
+
+        self.assertEqual(quiet_replies, [])
+        self.assertEqual(session.revision, original_revision)
+
+        _, trigger_event = coordinator.append_chat(
+            room.room_code,
+            owner.token,
+            "@ChatAI hello",
+        )
+        replies = coordinator.run_ai_chat_replies(room, session, trigger_event)
+
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(replies[0].event_type, "chat_message")
+        self.assertEqual(replies[0].payload["source"], "ai")
+        self.assertEqual(replies[0].actor_player_id, 1)
+        self.assertIn("Alice", replies[0].payload["message"])
+        self.assertEqual(session.revision, original_revision)
+
+    def test_ai_chat_all_mentions_all_enabled_ai_players(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        for preset_id, display_name in [
+            ("chat_ai_1", "ChatAI1"),
+            ("chat_ai_2", "ChatAI2"),
+        ]:
+            llm_admin.create_ai_player_preset(
+                {
+                    "id": preset_id,
+                    "display_name": display_name,
+                    "enabled": True,
+                    "model_preset_id": "fake_default",
+                    "chat_enabled": True,
+                    "chat_max_chars": 80,
+                }
+            )
+            room_service.add_ai_player(
+                room.room_code,
+                owner.token,
+                llm_admin.create_ai_snapshot(preset_id),
+            )
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, trigger_event = coordinator.append_chat(
+            room.room_code,
+            owner.token,
+            "@all hello",
+        )
+        replies = coordinator.run_ai_chat_replies(room, session, trigger_event)
+
+        self.assertEqual(len(replies), 2)
+        self.assertEqual([event.payload["source"] for event in replies], ["ai", "ai"])
+
+    def test_ai_chat_reply_respects_cooldown(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        llm_admin.create_ai_player_preset(
+            {
+                "id": "chat_ai",
+                "display_name": "ChatAI",
+                "enabled": True,
+                "model_preset_id": "fake_default",
+                "chat_enabled": True,
+                "chat_cooldown_seconds": 60,
+            }
+        )
+        room_service.add_ai_player(
+            room.room_code,
+            owner.token,
+            llm_admin.create_ai_snapshot("chat_ai"),
+        )
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, first_event = coordinator.append_chat(
+            room.room_code,
+            owner.token,
+            "@ChatAI first",
+        )
+        first_replies = coordinator.run_ai_chat_replies(room, session, first_event)
+        _, second_event = coordinator.append_chat(
+            room.room_code,
+            owner.token,
+            "@ChatAI second",
+        )
+        second_replies = coordinator.run_ai_chat_replies(room, session, second_event)
+
+        self.assertEqual(len(first_replies), 1)
+        self.assertEqual(second_replies, [])
 
     def test_admin_ai_action_test_accepts_custom_context(self):
         context = {

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from buckshot_roulette.llm.models import (
     AIPlayerPreset,
+    ChatTriggerMode,
     FallbackPolicy,
     ModelPreset,
     ProviderConfig,
@@ -336,6 +337,14 @@ def _ai_player_preset_from_dict(preset_id: str, raw: Any) -> AIPlayerPreset:
         custom_decision_prompt=_optional_string(raw.get("custom_decision_prompt")),
         persona_prompt=str(raw.get("persona_prompt", "")),
         strategy_prompt=str(raw.get("strategy_prompt", "")),
+        chat_enabled=_optional_bool(raw.get("chat_enabled"), False),
+        chat_prompt=str(raw.get("chat_prompt", "")),
+        chat_trigger_mode=ChatTriggerMode(
+            raw.get("chat_trigger_mode", ChatTriggerMode.MENTION.value)
+        ),
+        chat_model_preset_id=_optional_string(raw.get("chat_model_preset_id")),
+        chat_max_chars=int(raw.get("chat_max_chars", 160)),
+        chat_cooldown_seconds=int(raw.get("chat_cooldown_seconds", 5)),
         max_item_actions_per_turn=int(raw.get("max_item_actions_per_turn", 8)),
         max_parse_failures_per_turn=int(raw.get("max_parse_failures_per_turn", 2)),
         max_illegal_actions_per_turn=int(raw.get("max_illegal_actions_per_turn", 2)),
@@ -349,3 +358,11 @@ def _optional_string(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise TypeError("value must be a boolean")
+    return value
