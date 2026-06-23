@@ -93,6 +93,8 @@ $provider = @{
 #                      frequency_penalty
 #                      presence_penalty
 #                      stop
+#                      model_kwargs
+#                      extra_body
 #
 # Stored version is managed by the backend. Updating the same id increments it.
 # ---------------------------------------------------------------------------
@@ -121,8 +123,21 @@ $modelPreset = @{
 #   enabled                           Optional. Only enabled presets appear to
 #                                     normal clients. Default: true.
 #   model_preset_id                   Required. Must match an existing ModelPreset.id.
+#   rules_prompt_id                   Optional. Built-in game rules prompt id.
+#                                     Default: "builtin:ai_game_rules_v1".
+#   decision_prompt_id                Optional. Built-in decision prompt id.
+#                                     Default: "builtin:ai_decision_hints_v1".
+#   custom_rules_prompt               Optional. Non-empty value overrides rules_prompt_id.
+#   custom_decision_prompt            Optional. Non-empty value overrides decision_prompt_id.
 #   persona_prompt                    Optional. AI role/personality prompt.
 #   strategy_prompt                   Optional. AI play-style prompt.
+#   chat_enabled                      Optional. Whether this AI replies to chat.
+#                                     Default: false.
+#   chat_prompt                       Optional. Chat style prompt, used only for chat replies.
+#   chat_trigger_mode                 Optional. Currently supported value: "mention".
+#   chat_model_preset_id              Optional. Null means chat reuses model_preset_id.
+#   chat_max_chars                    Optional. Max AI chat reply length. Default: 160.
+#   chat_cooldown_seconds             Optional. Per-AI chat cooldown. Default: 5.
 #   max_item_actions_per_turn          Optional. Max item actions before shooting.
 #                                     Default: 8.
 #   max_parse_failures_per_turn        Optional. Max malformed model outputs before
@@ -141,8 +156,18 @@ $aiPlayerPreset = @{
     display_name = "Cautious OpenRouter Dealer"
     enabled = $true
     model_preset_id = "openrouter_default"
+    rules_prompt_id = "builtin:ai_game_rules_v1"
+    decision_prompt_id = "builtin:ai_decision_hints_v1"
+    custom_rules_prompt = $null
+    custom_decision_prompt = $null
     persona_prompt = "You are a careful Buckshot Roulette AI player."
     strategy_prompt = "Prefer legal, conservative actions. Use items when they reduce risk."
+    chat_enabled = $true
+    chat_prompt = "Keep table talk short, in character, and never reveal hidden information."
+    chat_trigger_mode = "mention"
+    chat_model_preset_id = $null
+    chat_max_chars = 160
+    chat_cooldown_seconds = 5
     max_item_actions_per_turn = 8
     max_parse_failures_per_turn = 2
     max_illegal_actions_per_turn = 2
