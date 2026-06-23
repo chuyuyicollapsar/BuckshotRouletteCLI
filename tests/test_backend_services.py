@@ -85,7 +85,7 @@ class BackendServiceTests(unittest.TestCase):
         self.assertNotIn("BLANK", visible.public_shell_counts)
         hp_events = [event for event in events if event.event_type == "player_hp_set"]
         self.assertEqual(len(hp_events), 1)
-        self.assertEqual(hp_events[0].message, "本场游戏玩家的初始生命值为 3。")
+        self.assertEqual(hp_events[0].message, "本局游戏玩家的初始生命值为 3。")
         self.assertEqual(hp_events[0].payload, {
             "initial_hp": 3,
             "players": [
@@ -225,7 +225,7 @@ class BackendServiceTests(unittest.TestCase):
         ])
         hp_events = [event for event in events if event.event_type == "player_hp_set"]
         self.assertEqual(len(hp_events), 1)
-        self.assertEqual(hp_events[0].message, "本场游戏玩家的初始生命值为 1。")
+        self.assertEqual(hp_events[0].message, "本局游戏玩家的初始生命值为 1。")
         self.assertEqual(hp_events[0].payload, {
             "initial_hp": 1,
             "players": [

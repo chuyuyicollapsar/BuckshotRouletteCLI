@@ -34,11 +34,11 @@ class GameEngine:
 
     def start_match(self, game_state: GameState) -> MatchState:
         if game_state.game_over:
-            raise ValueError("整局游戏已经结束。")
+            raise ValueError("整场比赛已经结束。")
         if game_state.current_match_state is not None:
-            raise ValueError("当前比赛尚未结束。")
+            raise ValueError("当前对局尚未结束。")
         if len(game_state.match_results) >= game_state.config.matches_per_game:
-            raise ValueError("比赛场数已经打满。")
+            raise ValueError("整场比赛的局数已经打满。")
 
         initial_hp = self._choose_initial_hp(game_state.config)
         players = [
@@ -62,7 +62,7 @@ class GameEngine:
     def finish_match(self, game_state: GameState) -> None:
         match = game_state.current_match_state
         if match is None or not match.match_over or match.winner_idx is None:
-            raise ValueError("当前没有可结算的比赛。")
+            raise ValueError("当前没有可结算的对局。")
 
         game_state.match_results.append(match.winner_idx)
         game_state.current_match_state = None
@@ -595,7 +595,7 @@ class GameEngine:
 
     def _ensure_match_active(self, match: MatchState) -> None:
         if match.match_over:
-            raise ValueError("当前比赛已经结束。")
+            raise ValueError("当前对局已经结束。")
 
     def _ensure_ready_for_action(self, match: MatchState) -> None:
         self._ensure_match_active(match)

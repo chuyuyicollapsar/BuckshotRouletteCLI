@@ -295,7 +295,7 @@ class TurnCoordinator:
             self.session_service.append_event(
                 session,
                 event_type="game_started",
-                message="游戏开始。",
+                message="比赛开始。",
                 payload={"players": [player.name for player in players]},
             )
         )
@@ -303,7 +303,7 @@ class TurnCoordinator:
             self.session_service.append_event(
                 session,
                 event_type="match_started",
-                message=f"第 {match.match_index + 1} 场比赛开始。",
+                message=f"第 {match.match_index + 1} 局游戏开始。",
                 payload={
                     "initial_hp": match.players[0].max_hp,
                     "players": [serialize_domain_player(player) for player in match.players],
@@ -333,7 +333,7 @@ class TurnCoordinator:
             raise ServiceError("状态版本已过期，请等待最新状态。")
         match = session.state.current_match_state
         if match is None:
-            raise ServiceError("当前没有进行中的比赛。")
+            raise ServiceError("当前没有进行中的对局。")
         if room_player.seat_index != match.current_player_idx:
             raise ServiceError("还没有轮到你行动。")
 
@@ -665,7 +665,7 @@ class TurnCoordinator:
             self.session_service.append_event(
                 session,
                 event_type="match_ended",
-                message=f"第 {match.match_index + 1} 场结束，胜者：{winner.name}。",
+                message=f"第 {match.match_index + 1} 局游戏结束，胜者：{winner.name}。",
                 payload={"winner_player_id": winner_idx},
             )
         )
@@ -684,7 +684,7 @@ class TurnCoordinator:
                 self.session_service.append_event(
                     session,
                     event_type="game_ended",
-                    message=f"整局游戏结束，最终结果：{final_name}。",
+                    message=f"整场比赛结束，最终结果：{final_name}。",
                     payload={
                         "match_results": session.state.match_results,
                         "final_winner_player_id": final_idx,
@@ -698,7 +698,7 @@ class TurnCoordinator:
                 self.session_service.append_event(
                     session,
                     event_type="match_started",
-                    message=f"第 {new_match.match_index + 1} 场比赛开始。",
+                    message=f"第 {new_match.match_index + 1} 局游戏开始。",
                     payload={
                         "initial_hp": new_match.players[0].max_hp,
                         "players": [
@@ -720,7 +720,7 @@ class TurnCoordinator:
             self.session_service.append_event(
                 session,
                 event_type="player_hp_set",
-                message=f"本场游戏玩家的初始生命值为 {initial_hp}。",
+                message=f"本局游戏玩家的初始生命值为 {initial_hp}。",
                 payload={
                     "initial_hp": initial_hp,
                     "players": [
