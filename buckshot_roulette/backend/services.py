@@ -543,13 +543,22 @@ class TurnCoordinator:
                 continue
             if snapshot.chat_trigger_mode != "mention":
                 continue
-            if wants_all or self._mentions_name(message, player.name):
+            if (
+                wants_all
+                or self._mentions_name(message, player.name)
+                or self._mentions_seat(message, player.seat_index)
+            ):
                 targets.append(player)
         return targets
 
     def _mentions_name(self, message: str, name: str) -> bool:
         escaped = re.escape(name)
         return re.search(rf"@{escaped}(?=\s|$|[，。！？,.!?])", message) is not None
+
+    def _mentions_seat(self, message: str, seat_index: int | None) -> bool:
+        if seat_index is None:
+            return False
+        return re.search(rf"@{seat_index}(?=\W|$)", message) is not None
 
     def _reserve_ai_chat(self, ai_player: RoomPlayer) -> bool:
         with self._ai_chat_lock:

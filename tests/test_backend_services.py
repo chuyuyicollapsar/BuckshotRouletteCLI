@@ -593,6 +593,41 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual(len(replies), 2)
         self.assertEqual([event.payload["source"] for event in replies], ["ai", "ai"])
 
+    def test_ai_chat_reply_supports_zero_based_seat_mention(self):
+        config = MatchConfig(
+            fixed_initial_hp=2,
+            fixed_shell_sequence=(ShellType.LIVE, ShellType.BLANK),
+            items_per_reload=0,
+        )
+        _, _, room_service, coordinator, room, owner, llm_admin = self.make_ai_services(
+            config
+        )
+        llm_admin.create_ai_player_preset(
+            {
+                "id": "chat_ai",
+                "display_name": "ChatAI",
+                "enabled": True,
+                "model_preset_id": "fake_default",
+                "chat_enabled": True,
+                "chat_max_chars": 80,
+            }
+        )
+        room_service.add_ai_player(
+            room.room_code,
+            owner.token,
+            llm_admin.create_ai_snapshot("chat_ai"),
+        )
+        session, _ = coordinator.start_game(room.room_code, owner.token)
+
+        _, human_event = coordinator.append_chat(room.room_code, owner.token, "@0 hi")
+        human_replies = coordinator.run_ai_chat_replies(room, session, human_event)
+        _, ai_event = coordinator.append_chat(room.room_code, owner.token, "@1 hi")
+        ai_replies = coordinator.run_ai_chat_replies(room, session, ai_event)
+
+        self.assertEqual(human_replies, [])
+        self.assertEqual(len(ai_replies), 1)
+        self.assertEqual(ai_replies[0].actor_player_id, 1)
+
     def test_ai_chat_reply_respects_cooldown(self):
         config = MatchConfig(
             fixed_initial_hp=2,
