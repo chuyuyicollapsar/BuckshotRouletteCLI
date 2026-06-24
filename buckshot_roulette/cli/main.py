@@ -859,7 +859,11 @@ def _raw_terminal_input() -> Any:
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
+        tty.setcbreak(fd)
+        current = termios.tcgetattr(fd)
+        current[1] |= getattr(termios, "OPOST", 0)
+        current[1] |= getattr(termios, "ONLCR", 0)
+        termios.tcsetattr(fd, termios.TCSADRAIN, current)
         yield
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
